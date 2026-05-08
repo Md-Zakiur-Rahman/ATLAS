@@ -197,34 +197,36 @@ class BlueTeamApp(ctk.CTk):
         print("[APP] Demo data loaded")
     
     def _show_dashboard(self):
-        """Show dashboard"""
+        """Show dashboard with all tabs"""
         for widget in self.content_frame.winfo_children():
             widget.destroy()
         
+        # Import tab modules
+        from dashboard.dashboard_tab import DashboardTab
+        from dashboard.encrypt_tab import EncryptTab
+        from dashboard.logs_tab import LogsTab
+        from dashboard.report_tab import ReportTab
+        from dashboard.settings_tab import SettingsTab
+        
+        # Create tab view
         tabview = CTkTabview(self.content_frame)
         tabview.pack(fill="both", expand=True)
         
+        # Add tabs
         tabview.add("Dashboard")
         tabview.add("Encrypt/Decrypt")
         tabview.add("Event Log")
         tabview.add("Reports")
         tabview.add("Settings")
         
-        dash_tab = tabview.tab("Dashboard")
-        CTkLabel(dash_tab, text="📊 Dashboard\n(Coming Day 2)", font=("Arial", 20, "bold"), text_color="#00ff00").pack(expand=True)
+        # Create tab content
+        self.dashboard_tab = DashboardTab(tabview.tab("Dashboard"), self.db)
+        self.encrypt_tab = EncryptTab(tabview.tab("Encrypt/Decrypt"), self.db)
+        self.logs_tab = LogsTab(tabview.tab("Event Log"), self.db)
+        self.report_tab = ReportTab(tabview.tab("Reports"), self.db)
+        self.settings_tab = SettingsTab(tabview.tab("Settings"), self.db)
         
-        enc_tab = tabview.tab("Encrypt/Decrypt")
-        CTkLabel(enc_tab, text="🔒 Encrypt/Decrypt\n(Coming Day 2)", font=("Arial", 20, "bold"), text_color="#0066ff").pack(expand=True)
-        
-        logs_tab = tabview.tab("Event Log")
-        CTkLabel(logs_tab, text="📋 Event Log\n(Coming Day 2)", font=("Arial", 20, "bold"), text_color="#ffaa00").pack(expand=True)
-        
-        reports_tab = tabview.tab("Reports")
-        CTkLabel(reports_tab, text="📄 Reports\n(Coming Day 3)", font=("Arial", 20, "bold"), text_color="#ff0066").pack(expand=True)
-        
-        settings_tab = tabview.tab("Settings")
-        CTkLabel(settings_tab, text="⚙️ Settings\n(Coming Day 2)", font=("Arial", 20, "bold"), text_color="#888888").pack(expand=True)
-        
+        # Add footer with logout
         footer = CTkFrame(self.main_container, height=50, fg_color="#0a0a0a")
         footer.pack(fill="x", padx=0, pady=0, side="bottom")
         footer.pack_propagate(False)
