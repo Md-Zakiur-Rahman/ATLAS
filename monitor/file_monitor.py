@@ -1,9 +1,11 @@
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
+from pathlib import Path
 from time import sleep
 import time
 import logging
 
+from monitor import rules
 from monitor.event_bus import event_bus
 from monitor.models import EventLog, ThreatLevel
 
@@ -146,16 +148,18 @@ class FileMonitorHandler(FileSystemEventHandler):
 
 observer = Observer()
 
-def start_monitor(path_to_watch="D:/ATLAS_TEST"):
+def start_monitor(path_to_watch=rules.DEFAULT_MONITOR_PATH):
 
     global observer
+
+    Path(path_to_watch).mkdir(parents=True, exist_ok=True)
 
     handler = FileMonitorHandler()
 
     observer.schedule(
         handler,
         path=path_to_watch,
-        recursive=True
+        recursive=rules.FILE_MONITOR_RECURSIVE
     )
 
     observer.start()

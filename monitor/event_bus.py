@@ -1,137 +1,102 @@
 """
-ATLAS Event Bus
-Adaptive Threat Level Assessment & Security System
+Thread-safe ATLAS event bus.
 
-Member B - Thread-Safe Event Communication Layer
+The bus provides synchronous fan-out to subscribers while also retaining a
+queue of published events for future consumers such as GUI listeners, database
+logging, response engines, and ML detectors.
 """
 
 import logging
-from queue import Queue
-from threading import Lock
+from queue import Empty, Queue
+from threading import Lock, RLock
 from typing import Callable, Dict, List
 
 
-# =========================================================
-# Logging Configuration
-# =========================================================
-
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(message)s"
+    format="%(asctime)s | %(levelname)s | %(message)s",
 )
 
 logger = logging.getLogger("ATLAS-EventBus")
 
 
-# =========================================================
-# Event Bus Class
-# =========================================================
-
 class EventBus:
+    """Thread-safe publisher/subscriber event bus."""
 
     def __init__(self):
-
-        # Thread-safe event queue
         self.event_queue = Queue()
-
-        # Registered listeners/subscribers
-        self.subscribers: List[Callable] = []
-
-        # Thread lock for subscriber safety
-        self.lock = Lock()
-
+        self._subscribers: List[Callable[[Dict], None]] = []
+        self._subscriber_lock = Lock()
+        self._publish_lock = RLock()
         logger.info("Event Bus Initialized")
 
-    # =====================================================
-    # Subscribe Method
-    # =====================================================
+    def subscribe(self, callback: Callable[[Dict], None]) -> None:
+        """Register a callback without racing other publishers/subscribers."""
 
-    def subscribe(self, callback: Callable):
+        with self._subscriber_lock:
+            if callback in self._subscribers:
+                logger.debug("Subscriber already registered: %s", callback.__name__)
+                return
 
-        with self.lock:
+            self._subscribers.append(callback)
 
-            self.subscribers.append(callback)
+        logger.info("Subscriber Registered: %s", callback.__name__)
 
-            logger.info(
-                f"Subscriber Registered: "
-                f"{callback.__name__}"
-            )
+    def unsubscribe(self, callback: Callable[[Dict], None]) -> None:
+        """Remove a callback if it is currently registered."""
 
-    # =====================================================
-    # Publish Event
-    # =====================================================
+        with self._subscriber_lock:
+            if callback not in self._subscribers:
+                return
 
-    def publish(self, event: Dict):
+            self._subscribers.remove(callback)
+
+        logger.info("Subscriber Removed: %s", callback.__name__)
+
+    def publish(self, event: Dict) -> None:
+        """Publish an event and notify a stable subscriber snapshot."""
 
         self.event_queue.put(event)
+        event_type = event.get("type", "UNKNOWN")
+        if event_type == "PROCESS_DETECTED":
+            logger.debug("Event Published: %s", event_type)
+        else:
+            logger.info("Event Published: %s", event_type)
 
-        logger.info(
-            f"Event Published: "
-            f"{event.get('type', 'UNKNOWN')}"
-        )
+        with self._publish_lock:
+            with self._subscriber_lock:
+                subscribers_snapshot = tuple(self._subscribers)
 
-        self._notify_subscribers(event)
-
-    # =====================================================
-    # Notify All Subscribers
-    # =====================================================
-
-    def _notify_subscribers(self, event: Dict):
-
-        with self.lock:
-
-            for subscriber in self.subscribers:
-
+            for subscriber in subscribers_snapshot:
                 try:
                     subscriber(event)
-
                 except Exception as error:
-
-                    logger.error(
-                        f"Subscriber Error "
-                        f"({subscriber.__name__}): {error}"
+                    logger.exception(
+                        "Subscriber Error (%s): %s",
+                        getattr(subscriber, "__name__", repr(subscriber)),
+                        error,
                     )
 
-    # =====================================================
-    # Retrieve Event From Queue
-    # =====================================================
-
     def get_event(self):
+        """Return the next queued event, or None when the queue is empty."""
 
-        if not self.event_queue.empty():
+        try:
+            return self.event_queue.get_nowait()
+        except Empty:
+            return None
 
-            return self.event_queue.get()
-
-        return None
-
-
-# =========================================================
-# Global Shared Event Bus Instance
-# =========================================================
 
 event_bus = EventBus()
 
 
-# =========================================================
-# Standalone Testing
-# =========================================================
-
 if __name__ == "__main__":
-
-    # Test Subscriber
     def test_listener(event):
+        print(f"Received Event -> {event}")
 
-        print(
-            f"Received Event -> {event}"
-        )
-
-    # Subscribe listener
     event_bus.subscribe(test_listener)
-
-    # Publish sample event
-    sample_event = {
-        "type": "FILE_MODIFIED",
-        "path": "D:/test/sample.txt"
-    }
-
-    event_bus.publish(sample_event)
+    event_bus.publish(
+        {
+            "type": "FILE_MODIFIED",
+            "path": "D:/test/sample.txt",
+        }
+    )

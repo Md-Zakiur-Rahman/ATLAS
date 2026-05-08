@@ -1,5 +1,5 @@
 from enum import Enum
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 
 
@@ -15,4 +15,6 @@ class EventLog:
     event_type: str
     severity: ThreatLevel
     details: str
-    timestamp: str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    timestamp: str = field(
+        default_factory=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    )

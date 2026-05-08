@@ -7,6 +7,10 @@ from monitor.file_monitor import (
     start_monitor,
     stop_monitor
 )
+from monitor.process_monitor import (
+    start_process_monitor,
+    stop_process_monitor
+)
 from monitor.event_bus import event_bus
 
 import logging
@@ -40,6 +44,7 @@ logger.info(
 
 # Start monitoring
 start_monitor()
+start_process_monitor()
 
 try:
 
@@ -51,5 +56,6 @@ try:
 except KeyboardInterrupt:
 
     stop_monitor()
+    stop_process_monitor()
 
     logger.info("ATLAS Stopped")
