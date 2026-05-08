@@ -47,3 +47,25 @@ def rotate_key(old_password: str, new_password: str, keyfile_path: str = "vault.
     save_keyfile(new_salt, keyfile_path)
     print("[KEY ROTATION] New key derived and keyfile updated.")
     return old_key, new_key
+
+def rotate_key_for_folder(old_password: str, new_password: str, folder: str, keyfile_path: str = "vault.keyfile") -> bool:
+    """
+    Full key rotation: decrypts folder with old key, re-encrypts with new key.
+    Safe: only deletes old keyfile after successful re-encryption.
+    """
+    from core.encryptor import decrypt_folder, encrypt_folder
+    try:
+        old_key, _ = get_or_create_key(old_password, keyfile_path)
+        decrypted = decrypt_folder(folder, old_key)
+        print(f"[KEY ROTATION] Decrypted {decrypted} files with old key.")
+
+        new_salt = generate_salt()
+        new_key = derive_key(new_password, new_salt)
+        save_keyfile(new_salt, keyfile_path)
+
+        encrypted = encrypt_folder(folder, new_key)
+        print(f"[KEY ROTATION] Re-encrypted {encrypted} files with new key.")
+        return True
+    except Exception as e:
+        print(f"[KEY ROTATION ERROR] {e}")
+        return False
