@@ -1,0 +1,7 @@
+customtkinter
+cryptography
+watchdog
+psutil
+matplotlib
+bcrypt
+pyinstaller
