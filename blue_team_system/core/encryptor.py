@@ -1,7 +1,7 @@
 import os
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-NONCE_SIZE = 12  # 96 bits, standard for AES-GCM
+NONCE_SIZE = 12
 
 def encrypt_file(path: str, key: bytes) -> bool:
     try:
@@ -14,9 +14,10 @@ def encrypt_file(path: str, key: bytes) -> bool:
 
         tmp_path = path + ".tmp"
         with open(tmp_path, 'wb') as f:
-            f.write(nonce + ciphertext)  # prepend nonce
+            f.write(nonce + ciphertext)
 
-        os.replace(tmp_path, path + ".enc")
+        enc_path = path + ".enc"
+        os.replace(tmp_path, enc_path)
         os.remove(path)
         return True
     except Exception as e:
@@ -50,9 +51,19 @@ def encrypt_folder(folder: str, key: bytes) -> int:
     count = 0
     for root, _, files in os.walk(folder):
         for filename in files:
-            if filename.endswith(".enc") or filename.endswith(".keyfile"):
+            if filename.endswith(".enc") or filename.endswith(".keyfile") or filename.endswith(".tmp"):
                 continue
             full_path = os.path.join(root, filename)
             if encrypt_file(full_path, key):
                 count += 1
+    return count
+
+def decrypt_folder(folder: str, key: bytes) -> int:
+    count = 0
+    for root, _, files in os.walk(folder):
+        for filename in files:
+            if filename.endswith(".enc"):
+                full_path = os.path.join(root, filename)
+                if decrypt_file(full_path, key):
+                    count += 1
     return count
