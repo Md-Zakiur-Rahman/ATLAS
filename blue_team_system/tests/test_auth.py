@@ -15,8 +15,12 @@ def test_password_hash_and_verify():
 
 def test_save_and_verify_auth_dev_mode():
     save_auth("securepass", filepath=AUTH_FILE)
-    assert verify_auth("securepass", filepath=AUTH_FILE, dev_mode=True) is True
+    success, alert = verify_auth("securepass", filepath=AUTH_FILE, dev_mode=True)
+    assert success is True
+    assert alert is None
 
 def test_wrong_password_fails():
     save_auth("securepass", filepath=AUTH_FILE)
-    assert verify_auth("wrongpass", filepath=AUTH_FILE, dev_mode=True) is False
+    success, alert = verify_auth("wrongpass", filepath=AUTH_FILE, dev_mode=True)
+    assert success is False
+    assert alert is None
