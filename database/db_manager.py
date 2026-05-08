@@ -159,3 +159,119 @@ class DatabaseManager:
                     print(f"[DB] Exported to {output_path}")
         except Exception as e:
             print(f"[DB] Export error: {e}")
+    
+    def get_event_count_by_type(self, hours: int = 24) -> Dict[str, int]:
+        """Count events by type in last N hours"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """SELECT event_type, COUNT(*) as count FROM events
+                       WHERE datetime(timestamp) > datetime('now', ? || ' hours')
+                       GROUP BY event_type""",
+                    (f'-{hours}',)
+                )
+                return {row[0]: row[1] for row in cursor.fetchall()} if cursor.fetchall() else {}
+        except Exception as e:
+            print(f"[DB] Error: {e}")
+            return {}
+
+    def get_events_by_hour(self, hours: int = 24) -> Dict[str, int]:
+        """Get hourly event distribution"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """SELECT strftime('%H:00', timestamp) as hour, COUNT(*) as count 
+                       FROM events
+                       WHERE datetime(timestamp) > datetime('now', ? || ' hours')
+                       GROUP BY hour
+                       ORDER BY hour""",
+                (f'-{hours}',)
+            )
+            return {row[0]: row[1] for row in cursor.fetchall()} if cursor.fetchall() else {}
+        except Exception as e:
+            print(f"[DB] Error: {e}")
+        return {}
+
+    def log_file_operation(self, operation: str, file_path: str, size_bytes: int, 
+                      encrypted: bool = False) -> int:
+        """Log file encryption/decryption operation"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """INSERT INTO protected_files 
+                    (file_path, file_name, size_bytes, encrypted, encrypted_timestamp)
+                    VALUES (?, ?, ?, ?, ?)""",
+                    (file_path, file_path.split('\\')[-1], size_bytes, encrypted, 
+                    datetime.now() if encrypted else None)
+                )
+                conn.commit()
+            
+            # Also log as event
+            self.log_event(
+                f"FILE_{operation.upper()}",
+                "LOW",
+                {"file": file_path, "size": size_bytes, "encrypted": encrypted}
+            )
+            return cursor.lastrowid
+        except Exception as e:
+            print(f"[DB] Error: {e}")
+            return -1
+
+    def get_encryption_stats(self, hours: int = 24) -> Dict:
+        """Get encryption/decryption statistics"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                # Encrypted files
+                cursor.execute(
+                    """SELECT COUNT(*) FROM protected_files 
+                    WHERE encrypted = 1 AND datetime(encrypted_timestamp) > datetime('now', ? || ' hours')""",
+                    (f'-{hours}',)
+                )
+                encrypted_count = cursor.fetchone()[0]
+                
+                # Total size encrypted
+                cursor.execute(
+                    """SELECT SUM(size_bytes) FROM protected_files 
+                    WHERE encrypted = 1 AND datetime(encrypted_timestamp) > datetime('now', ? || ' hours')""",
+                    (f'-{hours}',)
+                )
+                total_size = cursor.fetchone()[0] or 0
+                
+                return {
+                    "files_encrypted": encrypted_count,
+                    "total_size_bytes": total_size,
+                    "total_size_mb": round(total_size / (1024*1024), 2)
+                }
+        except Exception as e:
+            print(f"[DB] Error: {e}")
+            return {"files_encrypted": 0, "total_size_bytes": 0, "total_size_mb": 0}
+
+    def get_threat_summary(self, hours: int = 24) -> Dict:
+        """Get threat summary by type"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """SELECT threat_type, severity, COUNT(*) as count
+                    FROM threats
+                    WHERE datetime(timestamp) > datetime('now', ? || ' hours')
+                    GROUP BY threat_type, severity""",
+                    (f'-{hours}',)
+                )
+                result = cursor.fetchall()
+                
+                summary = {}
+                for threat_type, severity, count in result:
+                    if threat_type not in summary:
+                        summary[threat_type] = {}
+                    summary[threat_type][severity] = count
+                
+                return summary
+        except Exception as e:
+            print(f"[DB] Error: {e}")
+            return {}

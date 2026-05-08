@@ -1,11 +1,13 @@
 import customtkinter as ctk
 from customtkinter import CTkFrame, CTkLabel, CTkButton, CTkTextbox, CTkOptionMenu
 from datetime import datetime
+from dashboard.pdf_generator import PDFReportGenerator
 
 class ReportTab(CTkFrame):
     def __init__(self, parent, db):
         super().__init__(parent, fg_color="#1f1f1f")
         self.db = db
+        self.pdf_gen = PDFReportGenerator(db)
         self.pack(fill="both", expand=True, padx=10, pady=10)
         
         self._create_widgets()
@@ -32,7 +34,7 @@ class ReportTab(CTkFrame):
         
         self.report_type = CTkOptionMenu(
             option_frame,
-            values=["Summary", "Detailed", "Threats Only", "Incidents Timeline"],
+            values=["Summary", "Detailed", "Threats Only"],
             width=150
         )
         self.report_type.pack(side="left", padx=5)
@@ -42,7 +44,7 @@ class ReportTab(CTkFrame):
         
         self.time_period = CTkOptionMenu(
             option_frame,
-            values=["Last 24 hours", "Last 7 days", "Last 30 days", "All time"],
+            values=["Last 24 hours", "Last 7 days", "Last 30 days"],
             width=150
         )
         self.time_period.pack(side="left", padx=5)
@@ -52,82 +54,82 @@ class ReportTab(CTkFrame):
         button_frame = CTkFrame(self, fg_color="#0a0a0a")
         button_frame.pack(fill="x", pady=10)
         
-        generate_btn = ctk.CTkButton(
+        generate_txt_btn = ctk.CTkButton(
             button_frame,
-            text="📊 Generate Report",
-            command=self._generate_report,
+            text="📊 Generate TXT Report",
+            command=self._generate_txt_report,
             width=150,
             height=40,
             font=("Arial", 12, "bold"),
             fg_color="#0066ff",
             hover_color="#0088ff"
         )
-        generate_btn.pack(side="left", padx=10)
+        generate_txt_btn.pack(side="left", padx=10)
         
-        export_txt_btn = ctk.CTkButton(
+        generate_pdf_btn = ctk.CTkButton(
             button_frame,
-            text="💾 Export as TXT",
-            command=self._export_txt,
+            text="📄 Generate PDF Report",
+            command=self._generate_pdf_report,
+            width=160,
+            height=40,
+            font=("Arial", 12, "bold"),
+            fg_color="#ff6600",
+            hover_color="#ff8800"
+        )
+        generate_pdf_btn.pack(side="left", padx=10)
+        
+        export_csv_btn = ctk.CTkButton(
+            button_frame,
+            text="📥 Export as CSV",
+            command=self._export_csv,
             width=150,
             height=40,
             font=("Arial", 12, "bold"),
             fg_color="#00aa00",
             hover_color="#00dd00"
         )
-        export_txt_btn.pack(side="left", padx=10)
-        
-        copy_btn = ctk.CTkButton(
-            button_frame,
-            text="📋 Copy to Clipboard",
-            command=self._copy_clipboard,
-            width=160,
-            height=40,
-            font=("Arial", 12, "bold"),
-            fg_color="#ffaa00",
-            hover_color="#ffcc00"
-        )
-        copy_btn.pack(side="left", padx=10)
+        export_csv_btn.pack(side="left", padx=10)
         
         # Report Display
         self.report_box = CTkTextbox(self, width=800, height=400)
         self.report_box.pack(fill="both", expand=True, pady=10)
     
-    def _generate_report(self):
-        """Generate forensic report"""
-        report_type = self.report_type.get()
-        time_period = self.time_period.get()
-        
-        # Determine hours to look back
-        hours_map = {
+    def _get_hours(self):
+        """Get hours based on selected time period"""
+        period = self.time_period.get()
+        period_map = {
             "Last 24 hours": 24,
             "Last 7 days": 168,
-            "Last 30 days": 720,
-            "All time": 8760
+            "Last 30 days": 720
         }
-        hours = hours_map.get(time_period, 24)
-        
-        # Get data
+        return period_map.get(period, 24)
+    
+    def _generate_txt_report(self):
+        """Generate text report"""
+        hours = self._get_hours()
         stats = self.db.get_event_stats(hours=hours)
-        threats = self.db.get_threats(limit=50, hours=hours)
-        events = self.db.get_events(limit=100)
+        threats = self.db.get_threats(limit=20, hours=hours)
+        enc_stats = self.db.get_encryption_stats(hours=hours)
         
-        # Generate report
         report = f"""
 ╔══════════════════════════════════════════════════════════════╗
 ║           BLUE TEAM FORENSIC INCIDENT REPORT                  ║
 ╚══════════════════════════════════════════════════════════════╝
 
 Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-Report Type: {report_type}
-Time Period: {time_period}
+Report Type: {self.report_type.get()}
+Time Period: {self.time_period.get()}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
  EXECUTIVE SUMMARY
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Total Events Recorded:        {stats['total_events']}
-Critical Threats Detected:     {stats['critical_threats']}
-Report Status:                 {'🔴 CRITICAL' if stats['critical_threats'] > 5 else '🟠 HIGH' if stats['critical_threats'] > 0 else '🟢 SAFE'}
+Total Events:                  {stats['total_events']}
+Critical Threats:              {stats['critical_threats']}
+Files Encrypted:               {enc_stats['files_encrypted']}
+Data Encrypted:                {enc_stats['total_size_mb']} MB
+
+Status: {'🔴 CRITICAL' if stats['critical_threats'] > 5 else '🟠 HIGH' if stats['critical_threats'] > 0 else '🟢 SAFE'}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
  THREAT TIMELINE
@@ -156,44 +158,35 @@ Report Status:                 {'🔴 CRITICAL' if stats['critical_threats'] > 5
 ✓ Update threat detection rules based on findings
 ✓ Conduct periodic security awareness training
 ✓ Backup critical data regularly
-✓ Review access logs for anomalies
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- ANALYST NOTES
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-This report was auto-generated by the Blue Team Threat Detection System.
-For detailed analysis, review the raw event logs in the Event Log tab.
-
-Prepared by: Blue Team System v1.0
-Classification: Internal Use Only
 
 ═══════════════════════════════════════════════════════════════
 """
         
-        # Display report
         self.report_box.delete("0.0", "end")
         self.report_box.insert("0.0", report)
     
-    def _export_txt(self):
-        """Export report to TXT file"""
+    def _generate_pdf_report(self):
+        """Generate PDF report"""
         try:
-            content = self.report_box.get("0.0", "end")
-            filename = f"logs/forensic_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+            hours = self._get_hours()
+            report_type = self.report_type.get().lower()
+            self.pdf_gen.generate_report(report_type=report_type, hours=hours)
             
-            with open(filename, 'w') as f:
-                f.write(content)
-            
-            print(f"[REPORT] Exported to {filename}")
+            self.report_box.delete("0.0", "end")
+            self.report_box.insert("0.0", "✅ PDF Report generated successfully!\n\nCheck the logs/ folder for the PDF file.")
         except Exception as e:
-            print(f"[REPORT] Export error: {e}")
+            self.report_box.delete("0.0", "end")
+            self.report_box.insert("0.0", f"❌ Error generating PDF: {e}")
     
-    def _copy_clipboard(self):
-        """Copy report to clipboard"""
+    def _export_csv(self):
+        """Export events as CSV"""
         try:
-            content = self.report_box.get("0.0", "end")
-            self.report_box.clipboard_clear()
-            self.report_box.clipboard_append(content)
-            print("[REPORT] Report copied to clipboard")
+            hours = self._get_hours()
+            filename = f"logs/events_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+            self.db.export_events_csv(filename)
+            
+            self.report_box.delete("0.0", "end")
+            self.report_box.insert("0.0", f"✅ CSV exported successfully!\n\nFile: {filename}")
         except Exception as e:
-            print(f"[REPORT] Clipboard error: {e}")
+            self.report_box.delete("0.0", "end")
+            self.report_box.insert("0.0", f"❌ Error exporting CSV: {e}")

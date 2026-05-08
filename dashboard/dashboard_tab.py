@@ -1,8 +1,11 @@
 import customtkinter as ctk
 from customtkinter import CTkFrame, CTkLabel, CTkButton, CTkScrollableFrame
 import psutil
-from datetime import datetime, timedelta
 import threading
+from datetime import datetime, timedelta
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from matplotlib.figure import Figure
 
 class DashboardTab(CTkFrame):
     def __init__(self, parent, db):
@@ -13,6 +16,7 @@ class DashboardTab(CTkFrame):
         self._create_widgets()
         
         # Start background update thread
+        self.running = True
         self.update_thread = threading.Thread(target=self._background_update, daemon=True)
         self.update_thread.start()
     
@@ -40,33 +44,27 @@ class DashboardTab(CTkFrame):
         cpu_frame = CTkFrame(stats_inner, fg_color="#1f1f1f")
         cpu_frame.pack(fill="x", pady=5)
         
-        CTkLabel(cpu_frame, text="CPU Usage:", font=("Arial", 11)).pack(side="left", padx=10)
-        self.cpu_label = CTkLabel(cpu_frame, text="-- %", text_color="#00ff00", font=("Arial", 11, "bold"))
+        CTkLabel(cpu_frame, text="CPU:", font=("Arial", 11), width=80).pack(side="left", padx=10)
+        self.cpu_label = CTkLabel(cpu_frame, text="-- %", text_color="#00ff00", font=("Arial", 11, "bold"), width=60)
         self.cpu_label.pack(side="left", padx=10)
-        self.cpu_bar = CTkFrame(cpu_frame, fg_color="#333333", height=15)
-        self.cpu_bar.pack(side="left", padx=10, fill="x", expand=True)
         
         # RAM
         ram_frame = CTkFrame(stats_inner, fg_color="#1f1f1f")
         ram_frame.pack(fill="x", pady=5)
         
-        CTkLabel(ram_frame, text="RAM Usage:", font=("Arial", 11)).pack(side="left", padx=10)
-        self.ram_label = CTkLabel(ram_frame, text="-- %", text_color="#00ff00", font=("Arial", 11, "bold"))
+        CTkLabel(ram_frame, text="RAM:", font=("Arial", 11), width=80).pack(side="left", padx=10)
+        self.ram_label = CTkLabel(ram_frame, text="-- %", text_color="#00ff00", font=("Arial", 11, "bold"), width=60)
         self.ram_label.pack(side="left", padx=10)
-        self.ram_bar = CTkFrame(ram_frame, fg_color="#333333", height=15)
-        self.ram_bar.pack(side="left", padx=10, fill="x", expand=True)
         
         # Disk
         disk_frame = CTkFrame(stats_inner, fg_color="#1f1f1f")
         disk_frame.pack(fill="x", pady=5)
         
-        CTkLabel(disk_frame, text="Disk Usage:", font=("Arial", 11)).pack(side="left", padx=10)
-        self.disk_label = CTkLabel(disk_frame, text="-- %", text_color="#00ff00", font=("Arial", 11, "bold"))
+        CTkLabel(disk_frame, text="Disk:", font=("Arial", 11), width=80).pack(side="left", padx=10)
+        self.disk_label = CTkLabel(disk_frame, text="-- %", text_color="#00ff00", font=("Arial", 11, "bold"), width=60)
         self.disk_label.pack(side="left", padx=10)
-        self.disk_bar = CTkFrame(disk_frame, fg_color="#333333", height=15)
-        self.disk_bar.pack(side="left", padx=10, fill="x", expand=True)
         
-        # Threat Level Panel
+        # Threat Status Panel
         threat_frame = CTkFrame(self, fg_color="#0a0a0a")
         threat_frame.pack(fill="x", pady=10)
         
@@ -75,23 +73,33 @@ class DashboardTab(CTkFrame):
         threat_inner = CTkFrame(threat_frame, fg_color="#1f1f1f")
         threat_inner.pack(fill="x", padx=10, pady=5)
         
-        CTkLabel(threat_inner, text="Total Events (24h):", font=("Arial", 11)).pack(side="left", padx=10)
-        self.events_label = CTkLabel(threat_inner, text="0", text_color="#00ff00", font=("Arial", 12, "bold"))
+        CTkLabel(threat_inner, text="Total Events (24h):", font=("Arial", 11), width=150).pack(side="left", padx=10)
+        self.events_label = CTkLabel(threat_inner, text="0", text_color="#00ff00", font=("Arial", 12, "bold"), width=60)
         self.events_label.pack(side="left", padx=10)
         
-        CTkLabel(threat_inner, text="Critical Threats:", font=("Arial", 11)).pack(side="left", padx=30)
-        self.critical_label = CTkLabel(threat_inner, text="0", text_color="#ff0000", font=("Arial", 12, "bold"))
+        CTkLabel(threat_inner, text="Critical Threats:", font=("Arial", 11), width=150).pack(side="left", padx=10)
+        self.critical_label = CTkLabel(threat_inner, text="0", text_color="#ff0000", font=("Arial", 12, "bold"), width=60)
         self.critical_label.pack(side="left", padx=10)
+        
+        CTkLabel(threat_inner, text="Files Encrypted:", font=("Arial", 11), width=150).pack(side="left", padx=10)
+        self.encrypted_label = CTkLabel(threat_inner, text="0", text_color="#00ff00", font=("Arial", 12, "bold"), width=60)
+        self.encrypted_label.pack(side="left", padx=10)
+        
+        # Charts Frame
+        charts_frame = CTkFrame(self, fg_color="#1f1f1f")
+        charts_frame.pack(fill="both", expand=True, pady=10)
+        
+        self.chart_canvas = None
+        self._create_charts(charts_frame)
         
         # Recent Events Panel
         events_frame = CTkFrame(self, fg_color="#0a0a0a")
-        events_frame.pack(fill="both", expand=True, pady=10)
+        events_frame.pack(fill="x", pady=10)
         
         CTkLabel(events_frame, text="Recent Events", font=("Arial", 14, "bold"), text_color="#00ff00").pack(anchor="w", padx=10, pady=5)
         
-        # Scrollable event list
         self.events_list = CTkScrollableFrame(events_frame, fg_color="#1f1f1f")
-        self.events_list.pack(fill="both", expand=True, padx=10, pady=5)
+        self.events_list.pack(fill="x", padx=10, pady=5, side="left", expand=True)
         
         # Refresh button
         button_frame = CTkFrame(self, fg_color="#1f1f1f")
@@ -109,6 +117,37 @@ class DashboardTab(CTkFrame):
         # Initial update
         self.update_display()
     
+    def _create_charts(self, parent):
+        """Create matplotlib charts"""
+        try:
+            fig = Figure(figsize=(12, 4), dpi=100, facecolor='#1f1f1f')
+            
+            # Events by hour
+            ax1 = fig.add_subplot(121)
+            ax1.set_facecolor('#0a0a0a')
+            ax1.set_title('Events per Hour (24h)', color='#00ff00', fontsize=10)
+            ax1.tick_params(colors='#00ff00')
+            
+            # Threat severity distribution
+            ax2 = fig.add_subplot(122)
+            ax2.set_facecolor('#0a0a0a')
+            ax2.set_title('Threats by Severity', color='#00ff00', fontsize=10)
+            ax2.tick_params(colors='#00ff00')
+            
+            self.fig = fig
+            self.ax1 = ax1
+            self.ax2 = ax2
+            
+            if self.chart_canvas:
+                self.chart_canvas.get_tk_widget().destroy()
+            
+            self.chart_canvas = FigureCanvasTkAgg(fig, master=parent)
+            self.chart_canvas.draw()
+            self.chart_canvas.get_tk_widget().pack(fill="both", expand=True)
+            
+        except Exception as e:
+            print(f"[DASHBOARD] Chart error: {e}")
+    
     def update_display(self):
         """Update all dashboard elements"""
         try:
@@ -118,19 +157,21 @@ class DashboardTab(CTkFrame):
             disk_info = psutil.disk_usage('/')
             
             # Update labels
-            self.cpu_label.configure(text=f"{cpu_percent:.1f} %")
-            self.ram_label.configure(text=f"{ram_info.percent:.1f} %")
-            self.disk_label.configure(text=f"{disk_info.percent:.1f} %")
-            
-            # Update colors based on usage
-            self.cpu_label.configure(text_color=self._get_color(cpu_percent))
-            self.ram_label.configure(text_color=self._get_color(ram_info.percent))
-            self.disk_label.configure(text_color=self._get_color(disk_info.percent))
+            self.cpu_label.configure(text=f"{cpu_percent:.1f} %", text_color=self._get_color(cpu_percent))
+            self.ram_label.configure(text=f"{ram_info.percent:.1f} %", text_color=self._get_color(ram_info.percent))
+            self.disk_label.configure(text=f"{disk_info.percent:.1f} %", text_color=self._get_color(disk_info.percent))
             
             # Update event stats
             stats = self.db.get_event_stats(hours=24)
             self.events_label.configure(text=str(stats['total_events']))
             self.critical_label.configure(text=str(stats['critical_threats']))
+            
+            # Update encryption stats
+            enc_stats = self.db.get_encryption_stats(hours=24)
+            self.encrypted_label.configure(text=str(enc_stats['files_encrypted']))
+            
+            # Update charts
+            self._update_charts()
             
             # Update recent events list
             self._update_events_list()
@@ -138,13 +179,60 @@ class DashboardTab(CTkFrame):
         except Exception as e:
             print(f"[DASHBOARD] Update error: {e}")
     
+    def _update_charts(self):
+        """Update chart data"""
+        try:
+            # Get hourly event data
+            hourly_data = self.db.get_events_by_hour(hours=24)
+            
+            # Get threat data
+            threat_summary = self.db.get_threat_summary(hours=24)
+            
+            # Clear previous data
+            self.ax1.clear()
+            self.ax2.clear()
+            
+            # Plot hourly events
+            if hourly_data:
+                hours = list(hourly_data.keys())
+                counts = list(hourly_data.values())
+                self.ax1.plot(hours, counts, color='#00ff00', marker='o', linewidth=2, markersize=6)
+                self.ax1.fill_between(range(len(hours)), counts, alpha=0.3, color='#00ff00')
+            
+            self.ax1.set_facecolor('#0a0a0a')
+            self.ax1.set_title('Events per Hour', color='#00ff00', fontsize=10)
+            self.ax1.tick_params(colors='#888888')
+            self.ax1.grid(True, alpha=0.2, color='#444444')
+            
+            # Plot threat severity
+            if threat_summary:
+                severity_counts = {'LOW': 0, 'MEDIUM': 0, 'HIGH': 0, 'CRITICAL': 0}
+                for threat_type, severities in threat_summary.items():
+                    for severity, count in severities.items():
+                        severity_counts[severity] += count
+                
+                colors = ['#00ff00', '#ffff00', '#ff8800', '#ff0000']
+                severities = list(severity_counts.keys())
+                counts = list(severity_counts.values())
+                
+                self.ax2.bar(severities, counts, color=colors)
+            
+            self.ax2.set_facecolor('#0a0a0a')
+            self.ax2.set_title('Threats by Severity', color='#00ff00', fontsize=10)
+            self.ax2.tick_params(colors='#888888')
+            self.ax2.grid(True, alpha=0.2, axis='y', color='#444444')
+            
+            self.fig.tight_layout()
+            self.chart_canvas.draw()
+            
+        except Exception as e:
+            print(f"[DASHBOARD] Chart update error: {e}")
+    
     def _update_events_list(self):
         """Update the recent events list"""
-        # Clear existing
         for widget in self.events_list.winfo_children():
             widget.destroy()
         
-        # Get recent events
         events = self.db.get_events(limit=10)
         
         if not events:
@@ -153,15 +241,10 @@ class DashboardTab(CTkFrame):
         
         for event in events:
             event_frame = CTkFrame(self.events_list, fg_color="#0a0a0a")
-            event_frame.pack(fill="x", padx=5, pady=3)
+            event_frame.pack(fill="x", padx=5, pady=2)
             
-            # Color based on severity
             severity_color = self._get_severity_color(event['severity'])
-            
-            # Timestamp
             timestamp = event['timestamp'][:19] if event['timestamp'] else "N/A"
-            
-            # Event text
             event_text = f"[{event['severity']}] {timestamp}: {event['event_type']}"
             
             CTkLabel(
@@ -175,24 +258,24 @@ class DashboardTab(CTkFrame):
     
     def _background_update(self):
         """Background thread to update dashboard periodically"""
-        while True:
+        while self.running:
             try:
                 self.update_display()
                 threading.Event().wait(2)  # Update every 2 seconds
             except Exception as e:
-                print(f"[DASHBOARD] Background update error: {e}")
+                print(f"[DASHBOARD] Background error: {e}")
     
     @staticmethod
     def _get_color(percent):
         """Get color based on percentage"""
         if percent < 50:
-            return "#00ff00"  # Green
+            return "#00ff00"
         elif percent < 75:
-            return "#ffff00"  # Yellow
+            return "#ffff00"
         elif percent < 90:
-            return "#ff8800"  # Orange
+            return "#ff8800"
         else:
-            return "#ff0000"  # Red
+            return "#ff0000"
     
     @staticmethod
     def _get_severity_color(severity):

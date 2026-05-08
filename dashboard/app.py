@@ -24,6 +24,15 @@ class BlueTeamApp(ctk.CTk):
         
         self._create_layout()
         print("[APP] Application initialized")
+
+    def __del__(self):
+        """Cleanup when application closes"""
+        try:
+            if hasattr(self, 'dashboard_tab'):
+                self.dashboard_tab.running = False
+            print("[APP] Application cleanup complete")
+        except Exception as e:
+            print(f"[APP] Cleanup error: {e}")
     
     def _create_layout(self):
         """Create main layout"""
@@ -190,9 +199,25 @@ class BlueTeamApp(ctk.CTk):
         """Load sample data"""
         print("[APP] Loading demo data...")
         
+        # Auth event
+        self.db.log_auth_attempt("demo_user", True, "DEV_MODE")
         self.db.log_event("LOGIN_SUCCESS", "LOW", {"username": "demo_user"})
+        
+        # File monitoring
         self.db.log_event("FILE_MONITOR_STARTED", "LOW", {"directories": ["/home/demo"]})
+        
+        # Some file operations
+        self.db.log_file_operation("ENCRYPT", "document.pdf", 2048000, encrypted=True)
+        self.db.log_file_operation("ENCRYPT", "spreadsheet.xlsx", 1024000, encrypted=True)
+        
+        # Some events
+        self.db.log_event("BULK_FILE_OPERATION", "MEDIUM", {"operation": "delete", "count": 50})
+        self.db.log_event("SUSPICIOUS_PROCESS", "HIGH", {"process": "explorer.exe", "cpu": "85%"})
+        
+        # Some threats
         self.db.log_threat("HONEYPOT_ACCESS", "HIGH", process_name="explorer.exe", file_path="/home/demo/passwords.txt")
+        self.db.log_threat("BULK_DELETE_DETECTED", "CRITICAL", process_name="ransomware.exe", file_path="/user/documents")
+        self.db.log_threat("BRUTE_FORCE_ATTEMPT", "MEDIUM", process_name="cmd.exe")
         
         print("[APP] Demo data loaded")
     
@@ -232,16 +257,34 @@ class BlueTeamApp(ctk.CTk):
         footer.pack_propagate(False)
         
         def logout_action():
+            # Stop dashboard updates safely
+            try:
+                if hasattr(self, 'dashboard_tab') and self.dashboard_tab:
+                    self.dashboard_tab.running = False
+            except Exception as e:
+                print(f"[APP] Error stopping dashboard: {e}")
+            
             self.is_logged_in = False
             self.current_user = None
             self.user_label.configure(text="Not logged in", text_color="#888888")
             self.threat_label.configure(text="Status: OFFLINE", text_color="#888888")
             self._show_login_screen()
         
-        logout_btn = ctk.CTkButton(footer, text="🚪 Logout", command=logout_action, fg_color="#cc0000", hover_color="#ff0000")
+        logout_btn = ctk.CTkButton(
+            footer, 
+            text="🚪 Logout", 
+            command=logout_action, 
+            fg_color="#cc0000", 
+            hover_color="#ff0000"
+        )
         logout_btn.pack(side="right", padx=20, pady=10)
         
-        status_label = CTkLabel(footer, text="✓ All systems operational", font=("Arial", 11), text_color="#00ff00")
+        status_label = CTkLabel(
+            footer, 
+            text="✓ All systems operational", 
+            font=("Arial", 11), 
+            text_color="#00ff00"
+        )
         status_label.pack(side="left", padx=20, pady=10)
 
 def main():
