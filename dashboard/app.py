@@ -19,6 +19,10 @@ class BlueTeamApp(ctk.CTk):
         print("[APP] Initializing database...")
         self.db = DatabaseManager()
         
+        # Create shared alert config for all tabs
+        from dashboard.alerts import AlertConfig
+        self.alert_config = AlertConfig()
+        
         self.is_logged_in = False
         self.current_user = None
         
@@ -199,6 +203,18 @@ class BlueTeamApp(ctk.CTk):
         """Load sample data"""
         print("[APP] Loading demo data...")
         
+        # Clear any existing demo data first
+        try:
+            import sqlite3
+            conn = sqlite3.connect(self.db.db_path)
+            conn.execute("DELETE FROM protected_files WHERE file_path LIKE '%demo%'")
+            conn.execute("DELETE FROM protected_files WHERE file_path LIKE '%document%'")
+            conn.execute("DELETE FROM protected_files WHERE file_path LIKE '%spreadsheet%'")
+            conn.commit()
+            conn.close()
+        except:
+            pass
+        
         # Auth event
         self.db.log_auth_attempt("demo_user", True, "DEV_MODE")
         self.db.log_event("LOGIN_SUCCESS", "LOW", {"username": "demo_user"})
@@ -206,15 +222,17 @@ class BlueTeamApp(ctk.CTk):
         # File monitoring
         self.db.log_event("FILE_MONITOR_STARTED", "LOW", {"directories": ["/home/demo"]})
         
-        # Some file operations
-        self.db.log_file_operation("ENCRYPT", "document.pdf", 2048000, encrypted=True)
-        self.db.log_file_operation("ENCRYPT", "spreadsheet.xlsx", 1024000, encrypted=True)
+        # File operations (unique files only)
+        self.db.log_file_operation("ENCRYPT", "/demo/document1.pdf", 2048000, encrypted=True)
+        self.db.log_file_operation("ENCRYPT", "/demo/document2.xlsx", 1024000, encrypted=True)
+        self.db.log_file_operation("ENCRYPT", "/demo/document3.docx", 512000, encrypted=True)
         
-        # Some events
+        # Regular events
         self.db.log_event("BULK_FILE_OPERATION", "MEDIUM", {"operation": "delete", "count": 50})
         self.db.log_event("SUSPICIOUS_PROCESS", "HIGH", {"process": "explorer.exe", "cpu": "85%"})
+        self.db.log_event("FILE_MONITOR_STARTED", "LOW", {"directories": ["/home/demo"]})
         
-        # Some threats
+        # Threats
         self.db.log_threat("HONEYPOT_ACCESS", "HIGH", process_name="explorer.exe", file_path="/home/demo/passwords.txt")
         self.db.log_threat("BULK_DELETE_DETECTED", "CRITICAL", process_name="ransomware.exe", file_path="/user/documents")
         self.db.log_threat("BRUTE_FORCE_ATTEMPT", "MEDIUM", process_name="cmd.exe")
@@ -244,12 +262,12 @@ class BlueTeamApp(ctk.CTk):
         tabview.add("Reports")
         tabview.add("Settings")
         
-        # Create tab content
-        self.dashboard_tab = DashboardTab(tabview.tab("Dashboard"), self.db)
+        # Create tab content with shared alert config
+        self.dashboard_tab = DashboardTab(tabview.tab("Dashboard"), self.db, self.alert_config)
         self.encrypt_tab = EncryptTab(tabview.tab("Encrypt/Decrypt"), self.db)
         self.logs_tab = LogsTab(tabview.tab("Event Log"), self.db)
         self.report_tab = ReportTab(tabview.tab("Reports"), self.db)
-        self.settings_tab = SettingsTab(tabview.tab("Settings"), self.db)
+        self.settings_tab = SettingsTab(tabview.tab("Settings"), self.db, self.alert_config)
         
         # Add footer with logout
         footer = CTkFrame(self.main_container, height=50, fg_color="#0a0a0a")
