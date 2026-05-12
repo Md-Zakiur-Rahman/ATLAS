@@ -1,13 +1,22 @@
 """
-ATLAS attack simulator.
+ATLAS Dynamic Attack Simulator
 
-Safe file-activity simulator for validating:
-simulator -> file monitor -> event bus -> threat engine -> alert manager.
+Behavioral adversarial emulation engine for:
+- ransomware behavior
+- reconnaissance activity
+- honeypot interaction
+- mass deletion
+- suspicious process simulation
+
+This simulator intentionally avoids directly triggering alerts.
+ATLAS must detect malicious behavior dynamically.
 """
 
 import argparse
 import logging
+import os
 import random
+import string
 import time
 from pathlib import Path
 
@@ -24,181 +33,377 @@ logger = logging.getLogger("ATLAS-AttackSimulator")
 
 INTENSITY_PROFILES = {
     "low": {
-        "file_count": 12,
-        "operation_delay": 0.20,
-        "delete_count": rules.MASS_DELETE_THRESHOLD,
+        "file_count": 15,
+        "delay_min": 0.15,
+        "delay_max": 0.30,
     },
     "medium": {
-        "file_count": 25,
-        "operation_delay": 0.08,
-        "delete_count": rules.MASS_DELETE_THRESHOLD + 5,
+        "file_count": 30,
+        "delay_min": 0.05,
+        "delay_max": 0.15,
     },
     "high": {
-        "file_count": 45,
-        "operation_delay": 0.03,
-        "delete_count": rules.MASS_DELETE_THRESHOLD + 15,
+        "file_count": 60,
+        "delay_min": 0.01,
+        "delay_max": 0.05,
     },
 }
 
 
-def create_test_files(test_folder: Path, file_count: int) -> None:
-    test_folder.mkdir(parents=True, exist_ok=True)
-    print(f"[+] Creating {file_count} test files in {test_folder}")
+class AttackSimulator:
 
-    for index in range(file_count):
-        file_path = test_folder / f"document_{index}.txt"
-        file_path.write_text(f"ATLAS Test File {index}\n", encoding="utf-8")
+    def __init__(self, target_path: str, intensity: str):
 
-    print("[+] Test files ready")
+        self.target_path = Path(target_path)
 
+        self.profile = INTENSITY_PROFILES[intensity]
 
-def simulate_modification(test_folder: Path, operation_delay: float) -> None:
-    print("[!] Simulating rapid file modification")
+        self.file_count = self.profile["file_count"]
 
-    for file_path in sorted(test_folder.iterdir()):
-        if not file_path.is_file():
-            continue
+        self.delay_min = self.profile["delay_min"]
 
-        try:
-            with file_path.open("a", encoding="utf-8") as file:
-                file.write("MODIFIED BY ATLAS TEST\n")
-            print(f"[MODIFIED] {file_path.name}")
-        except OSError as error:
-            logger.warning("Modification failed for %s: %s", file_path, error)
+        self.delay_max = self.profile["delay_max"]
 
-        time.sleep(operation_delay)
+        self.generated_files = []
 
+    # =====================================================
+    # Utility
+    # =====================================================
 
-def simulate_mass_rename(test_folder: Path, operation_delay: float) -> None:
-    print("[!] Simulating ransomware-style rename activity")
+    def random_delay(self):
 
-    for file_path in sorted(test_folder.iterdir()):
-        if not file_path.is_file():
-            continue
-
-        if any(file_path.name.lower().endswith(ext) for ext in rules.SUSPICIOUS_EXTENSIONS):
-            continue
-
-        new_path = file_path.with_name(
-            f"{file_path.name}{random.choice(rules.SUSPICIOUS_EXTENSIONS)}"
+        time.sleep(
+            random.uniform(
+                self.delay_min,
+                self.delay_max
+            )
         )
 
-        try:
-            file_path.rename(new_path)
-            print(f"[RENAME] {file_path.name} -> {new_path.name}")
-        except OSError as error:
-            logger.warning("Rename failed for %s: %s", file_path, error)
+    def random_filename(self):
 
-        time.sleep(operation_delay)
+        keyword = random.choice(
+            rules.HONEYPOT_KEYWORDS
+        )
+
+        suffix = ''.join(
+            random.choices(
+                string.digits,
+                k=4
+            )
+        )
+
+        extension = random.choice(
+            rules.HONEYPOT_ALLOWED_EXTENSIONS
+        )
+
+        return (
+            f"{keyword}_{suffix}"
+            f"{extension}"
+        )
+
+    # =====================================================
+    # Environment Generation
+    # =====================================================
+
+    def generate_environment(self):
+
+        self.target_path.mkdir(
+            parents=True,
+            exist_ok=True
+        )
+
+        logger.info(
+            "Generating realistic file environment"
+        )
+
+        for _ in range(self.file_count):
+
+            filename = self.random_filename()
+
+            filepath = self.target_path / filename
+
+            try:
+
+                with open(filepath, "w") as file:
+
+                    file.write(
+                        "Sensitive corporate data\n"
+                    )
+
+                self.generated_files.append(
+                    filepath
+                )
+
+            except Exception as error:
+
+                logger.warning(
+                    "Environment generation failed: %s",
+                    error
+                )
+
+        logger.info(
+            "Environment ready (%s files)",
+            len(self.generated_files)
+        )
+
+    # =====================================================
+    # Reconnaissance Simulation
+    # =====================================================
+
+    def simulate_recon_activity(self):
+
+        logger.warning(
+            "Phase 1: Reconnaissance Activity"
+        )
+
+        files = random.sample(
+            self.generated_files,
+            min(10, len(self.generated_files))
+        )
+
+        for file_path in files:
+
+            try:
+
+                with open(file_path, "r") as file:
+                    file.read()
+
+                logger.info(
+                    "[RECON] Accessed %s",
+                    file_path.name
+                )
+
+            except Exception:
+                pass
+
+            self.random_delay()
+
+    # =====================================================
+    # Honeypot Interaction
+    # =====================================================
+
+    def simulate_honeypot_access(self):
+
+        logger.warning(
+            "Phase 2: Sensitive File Targeting"
+        )
+
+        candidate_files = []
+
+        for file_path in self.generated_files:
+
+            filename = file_path.name.lower()
+
+            if any(
+                keyword in filename
+                for keyword in rules.HONEYPOT_KEYWORDS
+            ):
+                candidate_files.append(
+                    file_path
+                )
+
+        random.shuffle(candidate_files)
+
+        for file_path in candidate_files[:8]:
+
+            try:
+
+                with open(file_path, "a") as file:
+
+                    file.write(
+                        "\nUNAUTHORIZED ACCESS\n"
+                    )
+
+                logger.info(
+                    "[HONEYPOT] Modified %s",
+                    file_path.name
+                )
+
+            except Exception:
+                pass
+
+            self.random_delay()
+
+    # =====================================================
+    # Ransomware Simulation
+    # =====================================================
+
+    def simulate_ransomware_behavior(self):
+
+        logger.warning(
+            "Phase 3: Ransomware Behavior"
+        )
+
+        targets = random.sample(
+            self.generated_files,
+            min(25, len(self.generated_files))
+        )
+
+        for file_path in targets:
+
+            if not file_path.exists():
+                continue
+
+            extension = random.choice(
+                rules.SUSPICIOUS_EXTENSIONS
+            )
+
+            encrypted_path = file_path.with_name(
+                f"{file_path.name}{extension}"
+            )
+
+            try:
+
+                with open(file_path, "a") as file:
+
+                    file.write(
+                        "\nENCRYPTED_PAYLOAD\n"
+                    )
+
+                file_path.rename(
+                    encrypted_path
+                )
+
+                logger.info(
+                    "[ENCRYPTED] %s",
+                    encrypted_path.name
+                )
+
+            except Exception as error:
+
+                logger.warning(
+                    "Encryption simulation failed: %s",
+                    error
+                )
+
+            self.random_delay()
+
+    # =====================================================
+    # Mass Deletion Simulation
+    # =====================================================
+
+    def simulate_mass_deletion(self):
+
+        logger.warning(
+            "Phase 4: Mass Deletion Activity"
+        )
+
+        files = list(
+            self.target_path.glob("*")
+        )
+
+        random.shuffle(files)
+
+        delete_count = min(
+            rules.MASS_DELETE_THRESHOLD + 5,
+            len(files)
+        )
+
+        for file_path in files[:delete_count]:
+
+            try:
+
+                os.remove(file_path)
+
+                logger.info(
+                    "[DELETED] %s",
+                    file_path.name
+                )
+
+            except Exception:
+                pass
+
+            self.random_delay()
+
+    # =====================================================
+    # Suspicious Process Simulation
+    # =====================================================
+
+    def simulate_suspicious_process(self):
+
+        logger.warning(
+            "Phase 5: Suspicious Process Activity"
+        )
+
+        logger.info(
+            "[PROCESS] Simulated credential dumping behavior"
+        )
+
+    # =====================================================
+    # Full Attack Chain
+    # =====================================================
+
+    def run(self):
+
+        print(
+            "\n========== "
+            "ATLAS DYNAMIC ATTACK SIMULATION "
+            "==========\n"
+        )
+
+        self.generate_environment()
+
+        time.sleep(1)
+
+        attack_chain = [
+            self.simulate_recon_activity,
+            self.simulate_honeypot_access,
+            self.simulate_ransomware_behavior,
+            self.simulate_mass_deletion,
+            self.simulate_suspicious_process,
+        ]
+
+        random.shuffle(
+            attack_chain
+        )
+
+        for phase in attack_chain:
+
+            phase()
+
+            time.sleep(
+                random.uniform(1, 3)
+            )
+
+        print(
+            "\n[+] Dynamic attack simulation completed.\n"
+        )
 
 
-def simulate_mass_delete(
-    test_folder: Path,
-    delete_count: int,
-    operation_delay: float,
-) -> None:
-    print(f"[!] Simulating deletion spike ({delete_count} deletes)")
+# =========================================================
+# CLI
+# =========================================================
 
-    files = [path for path in sorted(test_folder.iterdir()) if path.is_file()]
-    for file_path in files[:delete_count]:
-        try:
-            file_path.unlink()
-            print(f"[DELETED] {file_path.name}")
-        except OSError as error:
-            logger.warning("Delete failed for %s: %s", file_path, error)
+def parse_args():
 
-        time.sleep(operation_delay)
-
-
-def simulate_suspicious_process_event() -> None:
-    """
-    Publish a synthetic event for in-process demos.
-
-    This does not reach an already-running main.py process because the event bus
-    is in memory. Real process monitoring is handled by monitor/process_monitor.py.
-    """
-
-    from monitor.event_bus import event_bus
-
-    event_bus.publish(
-        {
-            "type": "PROCESS_DETECTED",
-            "process_name": "mimikatz.exe",
-            "pid": 99999,
-            "timestamp": time.time(),
-        }
+    parser = argparse.ArgumentParser(
+        description="ATLAS Dynamic Attack Simulator"
     )
-    print("[PROCESS] Published synthetic mimikatz.exe event for local bus demos")
 
-
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run safe ATLAS attack simulation")
     parser.add_argument(
         "--path",
         default=rules.DEFAULT_MONITOR_PATH,
-        help="Folder watched by ATLAS file monitor",
     )
+
     parser.add_argument(
         "--intensity",
-        choices=sorted(INTENSITY_PROFILES),
+        choices=["low", "medium", "high"],
         default="medium",
-        help="Attack simulation intensity",
     )
-    parser.add_argument(
-        "--skip-modify",
-        action="store_true",
-        help="Skip modification activity",
-    )
-    parser.add_argument(
-        "--skip-rename",
-        action="store_true",
-        help="Skip ransomware rename activity",
-    )
-    parser.add_argument(
-        "--skip-delete",
-        action="store_true",
-        help="Skip deletion spike activity",
-    )
-    parser.add_argument(
-        "--process-event",
-        action="store_true",
-        help="Publish one synthetic process event to this simulator process's bus",
-    )
+
     return parser.parse_args()
 
 
-def main() -> None:
+def main():
+
     args = parse_args()
-    profile = INTENSITY_PROFILES[args.intensity]
-    test_folder = Path(args.path)
 
-    print("\n========== ATLAS ATTACK SIMULATOR ==========")
-    print(f"Target    : {test_folder}")
-    print(f"Intensity : {args.intensity}")
-    print("Start main.py first so Watchdog can observe these file operations.\n")
+    simulator = AttackSimulator(
+        target_path=args.path,
+        intensity=args.intensity,
+    )
 
-    create_test_files(test_folder, profile["file_count"])
-    time.sleep(rules.FILE_MONITOR_STARTUP_DELAY_SECONDS)
-
-    if not args.skip_modify:
-        simulate_modification(test_folder, profile["operation_delay"])
-        time.sleep(1)
-
-    if not args.skip_rename:
-        simulate_mass_rename(test_folder, profile["operation_delay"])
-        time.sleep(1)
-
-    if not args.skip_delete:
-        simulate_mass_delete(
-            test_folder,
-            profile["delete_count"],
-            profile["operation_delay"],
-        )
-
-    if args.process_event:
-        simulate_suspicious_process_event()
-
-    print("\n[+] Simulation complete. Check the ATLAS console for alerts.\n")
+    simulator.run()
 
 
 if __name__ == "__main__":

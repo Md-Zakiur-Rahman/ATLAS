@@ -175,3 +175,32 @@ OFF_HOURS_ALERT_COOLDOWN_SECONDS = 60
 USB_SCAN_INTERVAL_SECONDS = 5
 
 USB_ALERT_COOLDOWN_SECONDS = 30
+
+HONEYPOT_MAX_DEPTH = 4
+
+HONEYPOT_EXCLUDED_DIRECTORIES = (
+    "Windows",
+    "Program Files",
+    "Program Files (x86)",
+    "AppData",
+    "$Recycle.Bin",
+    "System Volume Information",
+)
+
+HONEYPOT_ALLOWED_EXTENSIONS = (
+    ".txt",
+    ".docx",
+    ".xlsx",
+    ".pdf",
+    ".csv",
+    ".json",
+    ".db",
+)
+
+# =========================================================
+# False Positive Verification
+# =========================================================
+
+FALSE_POSITIVE_SCORE_THRESHOLD = 25
+
+FALSE_POSITIVE_DUPLICATE_LIMIT = 3

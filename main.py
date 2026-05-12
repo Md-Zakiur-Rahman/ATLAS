@@ -7,7 +7,8 @@ Initializes:
 - Process Monitor
 - Event Bus Connections
 """
-
+import psutil
+import os
 import logging
 from time import sleep
 
@@ -29,6 +30,22 @@ from monitor.usb_monitor import (
 # =========================================================
 # Logging Configuration
 # =========================================================
+def log_memory_usage():
+
+    process = psutil.Process(
+        os.getpid()
+    )
+
+    memory_mb = (
+        process.memory_info().rss
+        / 1024
+        / 1024
+    )
+
+    logger.info(
+        "ATLAS Memory Usage: %.2f MB",
+        memory_mb
+    )
 
 logging.basicConfig(
     level=logging.INFO,
@@ -76,8 +93,10 @@ try:
     logger.info("ATLAS Started")
 
     while True:
-        sleep(1)
 
+        log_memory_usage()
+
+        sleep(5)
 except KeyboardInterrupt:
 
     logger.info(

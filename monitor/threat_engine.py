@@ -4,7 +4,7 @@ ATLAS threat engine.
 Consumes events from the event bus, applies configurable rules from
 monitor.rules, and dispatches alerts through AlertManager.
 """
-
+import os
 import logging
 import time
 from collections import deque
@@ -37,39 +37,80 @@ class ThreatEngine:
     """Rule-based detection engine for file, login, and process activity."""
 
     def __init__(self, alert_manager: Optional[AlertManager] = None):
+        self.false_positive_counter = 0
+
+        self.total_alerts = 0
         self.file_event_tracker = {}
+        self.max_tracker_size = 5000
         self.threat_score = 0
         self.current_threat_level = "LOW"
         self.alert_manager = alert_manager or AlertManager()
         self.last_alert_time: Dict[str, float] = {}
         self.failed_login_attempts: Deque[Dict] = deque()
-        self.recent_events: Deque[SecurityEvent] = deque()
+        self.recent_events: Deque[SecurityEvent] = deque(
+    maxlen=1000
+)
         logger.info("Threat Engine Initialized")
 
-    def process_event(self, event: Dict) -> None:
-        """Validate and analyze a single event bus payload."""
+    def process_event(self,event: Dict) -> None:
+    
+    #Validate and analyze a single event bus payload.
+    
 
         try:
-            validated_event = self._validate_event(event)
+
+            validated_event = (
+                self._validate_event(event)
+            )
+
             if not validated_event:
                 return
 
-            if self._is_duplicate_event(validated_event):
+            validated_event.processed_at = (
+                time.time()
+            )
+
+            latency = (
+                self._calculate_detection_latency(
+                    validated_event
+                )
+            )
+
+            logger.info(
+                "Detection Latency: %.4f sec",
+                latency
+            )
+
+            if self._is_duplicate_event(
+                validated_event
+            ):
                 return
 
             if validated_event.event_type in (
-            *rules.PROCESS_EVENT_TYPES,
-            "USB_DEVICE_CONNECTED"
+                *rules.PROCESS_EVENT_TYPES,
+                "USB_DEVICE_CONNECTED"
             ):
-                self._analyze_system_event(validated_event)
+
+                self._analyze_system_event(
+                    validated_event
+                )
+
                 return
 
-            self.recent_events.append(validated_event)
+            self.recent_events.append(
+                validated_event
+            )
+
             self._cleanup_old_events()
+
             self._analyze_file_events()
 
         except Exception as error:
-            logger.exception("Threat Engine Error: %s", error)
+
+            logger.exception(
+                "Threat Engine Error: %s",
+                error
+            )
 
     def process_failed_login(self, username: str, source: str = "LOCAL") -> None:
         """Record and analyze failed login activity."""
@@ -107,20 +148,38 @@ class ThreatEngine:
                 ),
             )
 
-    def _validate_event(self, event: Dict) -> Optional[SecurityEvent]:
+    def _validate_event(
+        self,
+        event: Dict
+    ) -> Optional[SecurityEvent]:
+
         if "type" not in event:
-            logger.warning("Invalid Event Missing Key: type")
+
+            logger.warning(
+                "Invalid Event Missing Key: type"
+            )
+
             return None
 
         event_type = event["type"]
-        path = event.get("path") or event.get("process_name") or "UNKNOWN"
-        timestamp = event.get("timestamp", time.time())
+
+        path = (
+            event.get("path")
+            or event.get("process_name")
+            or "UNKNOWN"
+        )
+
+        created_at = event.get(
+            "created_at",
+            time.time()
+        )
 
         return SecurityEvent(
             event_type=event_type,
+            severity=ThreatLevel.LOW,
             path=path,
-            timestamp=timestamp,
             payload=event,
+            created_at=created_at,
         )
     def _is_duplicate_event(
     self,
@@ -150,7 +209,15 @@ class ThreatEngine:
         < rules.DUPLICATE_EVENT_WINDOW_SECONDS
         ):
             return True
+        if len(self.file_event_tracker) > self.max_tracker_size:
 
+            oldest_key = next(
+            iter(self.file_event_tracker)
+            )
+
+            del self.file_event_tracker[
+            oldest_key
+            ]
         self.file_event_tracker[key] = current_time
 
         return False
@@ -171,7 +238,32 @@ class ThreatEngine:
                 break
 
     def _analyze_file_events(self) -> None:
+        
+        filename = os.path.basename(
+            event.path
+        ).lower()
 
+        sensitive_keywords_detected = any(
+            keyword in filename
+            for keyword in rules.HONEYPOT_KEYWORDS
+        )
+
+        if sensitive_keywords_detected:
+
+            self._update_threat_score(
+                "OFF_HOURS_ACTIVITY"
+            )
+
+            self._trigger_alert(
+                rule_key="honeypot_behavior",
+                cooldown_seconds=15,
+                severity=ThreatLevel.HIGH,
+                title="Sensitive File Targeting Detected",
+                details=(
+                    f"Suspicious interaction with "
+                    f"sensitive-looking file: {filename}"
+                ),
+            )
         if self._is_off_hours_activity():
 
             self._update_threat_score(
@@ -399,6 +491,41 @@ class ThreatEngine:
             return "MEDIUM"
 
         return "LOW"
+    
+    def _calculate_detection_latency(
+        self,
+        event: SecurityEvent
+    ) -> float:
+            """
+        Calculate event processing latency.
+        """
+
+            return (
+            event.processed_at
+            - event.created_at
+        )
+    
+    def _verify_false_positive(self,threat_score: int) -> bool:
+        """
+    Determine whether activity
+    is likely a false positive.
+    """
+
+        if (
+        threat_score
+        < rules.FALSE_POSITIVE_SCORE_THRESHOLD
+        ):
+
+            self.false_positive_counter += 1
+
+            logger.warning(
+            "Potential False Positive Detected"
+            )
+
+            return True
+
+        return False
+
     def _is_off_hours_activity(self) -> bool:
         """
     Detect suspicious activity during off-hours.
@@ -421,16 +548,48 @@ class ThreatEngine:
         title: str,
         details: str,
     ) -> None:
-        current_time = time.time()
-        last_time = self.last_alert_time.get(rule_key, 0)
 
-        if current_time - last_time < cooldown_seconds:
-            logger.debug("Alert suppressed by cooldown: %s", rule_key)
+        current_time = time.time()
+
+        last_time = self.last_alert_time.get(
+            rule_key,
+            0
+        )
+
+        if (
+            current_time - last_time
+            < cooldown_seconds
+        ):
+
+            logger.debug(
+                "Alert suppressed by cooldown: %s",
+                rule_key
+            )
+
             return
 
-        self.last_alert_time[rule_key] = current_time
-        logger.warning("[%s] %s | %s", severity.value, title, details)
-        self.alert_manager.dispatch_alert(severity, title, details)
+        self.last_alert_time[
+            rule_key
+        ] = current_time
+
+        self.total_alerts += 1
+
+        self._verify_false_positive(
+            self.threat_score
+        )
+
+        logger.warning(
+            "[%s] %s | %s",
+            severity.value,
+            title,
+            details
+        )
+
+        self.alert_manager.dispatch_alert(
+            severity,
+            title,
+            details
+        )
 
 
 if __name__ == "__main__":
