@@ -56,6 +56,44 @@ SUSPICIOUS_EXTENSION_COOLDOWN_SECONDS = 15
 BRUTE_FORCE_COOLDOWN_SECONDS = 30
 PROCESS_ALERT_COOLDOWN_SECONDS = 60
 
+# =========================================================
+# Threat Scoring System
+# =========================================================
+
+THREAT_SCORES = {
+
+    # File Threats
+    "SUSPICIOUS_EXTENSION": 20,
+    "MASS_RENAME": 50,
+    "MASS_MODIFY": 35,
+    "MASS_DELETE": 45,
+
+    # Authentication Threats
+    "BRUTE_FORCE": 40,
+
+    # Process Threats
+    "BLOCKED_PROCESS": 80,
+
+    # Device Threats
+    "USB_DEVICE": 25,
+
+    # Behavioral Threats
+    "OFF_HOURS_ACTIVITY": 15,
+}
+
+
+THREAT_LEVEL_THRESHOLDS = {
+
+    "LOW": 0,
+    "MEDIUM": 30,
+    "HIGH": 60,
+    "CRITICAL": 90,
+}
+
+
+THREAT_SCORE_DECAY = 5
+
+THREAT_SCORE_DECAY_INTERVAL_SECONDS = 60
 
 # =========================================================
 # Suspicious Extensions
@@ -84,7 +122,7 @@ BLOCKED_PROCESSES = {
     "mimikatz.exe": ThreatLevel.CRITICAL,
     "nc.exe": ThreatLevel.HIGH,
     "netcat.exe": ThreatLevel.HIGH,
-    "powershell.exe": ThreatLevel.HIGH,
+    
 }
 
 PROCESS_EVENT_TYPES = ("PROCESS_DETECTED",)
@@ -110,3 +148,30 @@ THREAT_RULES = {
     "blocked_processes": list(BLOCKED_PROCESSES.keys()),
     "process_scan_interval_seconds": PROCESS_SCAN_INTERVAL_SECONDS,
 }
+# =========================================================
+# False Positive Filtering
+# =========================================================
+
+DUPLICATE_EVENT_WINDOW_SECONDS = 1
+
+MAX_EVENTS_PER_FILE_WINDOW = 5
+
+EVENT_DEDUPLICATION_ENABLED = True
+AUTO_TERMINATE_BLOCKED_PROCESSES = True
+
+# =========================================================
+# Off-Hours Activity Detection
+# =========================================================
+
+OFF_HOURS_START = 0
+
+OFF_HOURS_END = 6
+
+OFF_HOURS_ALERT_COOLDOWN_SECONDS = 60
+# =========================================================
+# USB Monitoring
+# =========================================================
+
+USB_SCAN_INTERVAL_SECONDS = 5
+
+USB_ALERT_COOLDOWN_SECONDS = 30

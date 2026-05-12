@@ -10,7 +10,7 @@ import logging
 import threading
 import time
 from typing import Dict, Optional, Set, Tuple
-
+from monitor.models import ThreatLevel
 import psutil
 
 from monitor import rules
@@ -73,6 +73,17 @@ class ProcessMonitor:
                 continue
 
             self._seen_processes.add(process_key)
+            normalized_name = (
+                process_info["process_name"]
+                .lower()
+            )
+
+            if normalized_name in rules.BLOCKED_PROCESSES:
+
+                self._terminate_blocked_process(
+                    process_name=process_info["process_name"],
+                    pid=process_info["pid"]
+                )
             event_bus.publish(
                 {
                     "type": "PROCESS_DETECTED",
@@ -82,6 +93,48 @@ class ProcessMonitor:
                     "username": process_info.get("username"),
                     "timestamp": time.time(),
                 }
+            )
+
+    def _terminate_blocked_process(
+        self,
+        process_name: str,
+        pid: int
+    ) -> None:
+        """
+        Terminate blocked malicious processes.
+        """
+
+        if not rules.AUTO_TERMINATE_BLOCKED_PROCESSES:
+            return
+
+        try:
+
+            process = psutil.Process(pid)
+
+            process.terminate()
+
+            logger.warning(
+                "Blocked process terminated: %s (PID %s)",
+                process_name,
+                pid
+            )
+
+        except (
+            psutil.NoSuchProcess,
+            psutil.AccessDenied,
+            psutil.ZombieProcess
+        ):
+
+            logger.warning(
+                "Failed to terminate process: %s",
+                process_name
+            )
+
+        except Exception as error:
+
+            logger.exception(
+                "Process termination error: %s",
+                error
             )
 
     def _iter_processes(self):

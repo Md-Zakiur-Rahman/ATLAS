@@ -1,8 +1,17 @@
 """
 ATLAS Main Launcher
+
+Initializes:
+- Threat Engine
+- File Monitor
+- Process Monitor
+- Event Bus Connections
 """
 
-from monitor.threat_engine import ThreatEngine
+import logging
+from time import sleep
+
+from monitor.event_bus import event_bus
 from monitor.file_monitor import (
     start_monitor,
     stop_monitor
@@ -11,14 +20,14 @@ from monitor.process_monitor import (
     start_process_monitor,
     stop_process_monitor
 )
-from monitor.event_bus import event_bus
-
-import logging
-from time import sleep
-
+from monitor.threat_engine import ThreatEngine
+from monitor.usb_monitor import (
+    start_usb_monitor,
+    stop_usb_monitor
+)
 
 # =========================================================
-# Logging
+# Logging Configuration
 # =========================================================
 
 logging.basicConfig(
@@ -35,16 +44,32 @@ logger = logging.getLogger("ATLAS-Main")
 
 engine = ThreatEngine()
 
-# Subscribe engine to event bus
-event_bus.subscribe(engine.process_event)
+event_bus.subscribe(
+    engine.process_event
+)
 
 logger.info(
     "Threat Engine Connected To Event Bus"
 )
 
-# Start monitoring
+
+# =========================================================
+# Start Monitoring Services
+# =========================================================
+
 start_monitor()
+
 start_process_monitor()
+start_usb_monitor()
+
+logger.info(
+    "All Monitoring Services Started"
+)
+
+
+# =========================================================
+# Main Runtime Loop
+# =========================================================
 
 try:
 
@@ -55,7 +80,27 @@ try:
 
 except KeyboardInterrupt:
 
+    logger.info(
+        "Shutdown Signal Received"
+    )
+
     stop_monitor()
+    stop_usb_monitor()
     stop_process_monitor()
 
+    logger.info(
+        "All Monitoring Services Stopped"
+    )
+
     logger.info("ATLAS Stopped")
+
+except Exception as error:
+
+    logger.exception(
+        "Fatal ATLAS Error: %s",
+        error
+    )
+
+    stop_monitor()
+
+    stop_process_monitor()
