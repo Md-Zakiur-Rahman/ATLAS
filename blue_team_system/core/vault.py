@@ -6,20 +6,38 @@ from core.alert_manager_stub import dispatch_alert
 
 VAULT_FLAG = "vault.locked"
 KEYFILE_PATH = "vault.keyfile"
+NGROK_URL_FILE = ".ngrok_url"  # written by main.py after ngrok starts
 
-def lock(reason: str = "Manual lock", password: str = None, folder: str = None) -> None:
-    """
-    Called by response_engine on CRITICAL. Password and folder optional —
-    if not provided, reads from config. Dispatch alert automatically.
-    """
-    with open(VAULT_FLAG, 'w') as f:
-        f.write(reason)
-    dispatch_alert({
+def _get_ngrok_url() -> str:
+    if os.path.exists(NGROK_URL_FILE):
+        with open(NGROK_URL_FILE, 'r') as f:
+            return f.read().strip()
+    return ""
+
+def _build_remote_lock_alert(reason: str) -> dict:
+    alert = {
         "type": "VAULT_LOCKED",
         "severity": "CRITICAL",
         "timestamp": time.time(),
         "message": f"Vault locked. Reason: {reason}"
-    })
+    }
+    try:
+        from core.biometric_auth import get_remote_lock_url
+        base_url = _get_ngrok_url()
+        if base_url:
+            lock_url, token = get_remote_lock_url(base_url)
+            alert["remote_lock_url"] = lock_url
+            alert["remote_lock_token"] = token
+            alert["message"] += f" | Remote lock: {lock_url}"
+    except Exception as e:
+        print(f"[VAULT] Remote lock URL generation failed: {e}")
+    return alert
+
+def lock(reason: str = "Manual lock", password: str = None, folder: str = None) -> None:
+    with open(VAULT_FLAG, 'w') as f:
+        f.write(reason)
+    alert = _build_remote_lock_alert(reason)
+    dispatch_alert(alert)
     print(f"[VAULT] Locked. Reason: {reason}")
     if folder and password:
         key, _ = get_or_create_key(password, KEYFILE_PATH)

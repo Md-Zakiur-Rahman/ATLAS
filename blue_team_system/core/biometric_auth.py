@@ -167,6 +167,7 @@ def _cleanup_expired_tokens() -> None:
     expired = [t for t, exp in _remote_tokens.items() if exp < now]
     for t in expired:
         del _remote_tokens[t]
+        
 
 @flask_app.route("/remote-lock", methods=["POST"])
 def remote_lock():
@@ -193,3 +194,13 @@ def start_flask_server(port: int = 5000) -> None:
     t = threading.Thread(target=run, daemon=True)
     t.start()
     print(f"[FLASK] Remote lock server running on port {port}")
+    
+def get_remote_lock_url(base_url: str) -> tuple[str, str]:
+    """
+    Generates a one-time remote lock token and returns
+    the full lock URL and the token itself.
+    base_url example: 'https://abc123.ngrok.io'
+    """
+    token = generate_remote_token()
+    url = f"{base_url}/remote-lock"
+    return url, token
