@@ -3,6 +3,7 @@ CREATE TABLE IF NOT EXISTS events (
     event_type TEXT NOT NULL,
     severity TEXT NOT NULL,
     details TEXT,
+    category TEXT,
     timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -36,5 +37,6 @@ CREATE TABLE IF NOT EXISTS protected_files (
 
 CREATE INDEX IF NOT EXISTS idx_events_severity ON events(severity);
 CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp);
+CREATE INDEX IF NOT EXISTS idx_events_timestamp_category ON events(timestamp, category);
 CREATE INDEX IF NOT EXISTS idx_threats_timestamp ON threats(timestamp);
 CREATE INDEX IF NOT EXISTS idx_auth_timestamp ON auth_log(timestamp);

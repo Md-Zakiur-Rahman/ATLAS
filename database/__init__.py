@@ -1,3 +1,36 @@
-from .db_manager import DatabaseManager, ThreatLevel
+# database/__init__.py
+from .db_manager import (
+    log_event,
+    get_events,
+    get_network_connections,
+    get_flagged_ips,
+    get_threats,
+    log_network_connection,
+    log_file_rename,
+    mark_rename_rolled_back,
+    log_threat,
+    create_user,
+    get_user_by_email,
+    link_telegram,
+    verify_chain,
+    export_events_csv,
+    clear_old_events,
+)
 
-__all__ = ['DatabaseManager', 'ThreatLevel']
+__all__ = [
+    "log_event",
+    "get_events",
+    "get_network_connections",
+    "get_flagged_ips",
+    "get_threats",
+    "log_network_connection",
+    "log_file_rename",
+    "mark_rename_rolled_back",
+    "log_threat",
+    "create_user",
+    "get_user_by_email",
+    "link_telegram",
+    "verify_chain",
+    "export_events_csv",
+    "clear_old_events",
+]

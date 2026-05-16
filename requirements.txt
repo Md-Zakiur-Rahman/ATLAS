@@ -11,3 +11,4 @@ seaborn==0.13.0
 pywin32==306
 pystray==0.19.4
 win10toast==0.9
+supabase==2.0.0

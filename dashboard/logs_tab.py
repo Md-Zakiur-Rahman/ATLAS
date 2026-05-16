@@ -1,163 +1,119 @@
 import customtkinter as ctk
-from customtkinter import CTkFrame, CTkLabel, CTkButton, CTkScrollableFrame, CTkOptionMenu
-import csv
-from datetime import datetime
+import threading
+from database.db_manager import get_events, verify_chain
 
-class LogsTab(CTkFrame):
-    def __init__(self, parent, db):
-        super().__init__(parent, fg_color="#1f1f1f")
-        self.db = db
-        self.pack(fill="both", expand=True, padx=10, pady=10)
-        
-        self._create_widgets()
-        self.refresh_logs()
-    
-    def _create_widgets(self):
-        """Create logs interface"""
-        # Title
-        title = CTkLabel(
-            self,
-            text="📋 Event Log Viewer",
-            font=("Arial", 20, "bold"),
-            text_color="#00ff00"
-        )
-        title.pack(pady=10)
-        
-        # Control Panel
-        control_frame = CTkFrame(self, fg_color="#0a0a0a")
-        control_frame.pack(fill="x", pady=10)
-        
-        # Filter by Severity
-        filter_frame = CTkFrame(control_frame, fg_color="#0a0a0a")
-        filter_frame.pack(fill="x", padx=10, pady=5)
-        
-        CTkLabel(filter_frame, text="Filter by Severity:", font=("Arial", 11)).pack(side="left", padx=5)
-        
-        self.severity_filter = CTkOptionMenu(
-            filter_frame,
-            values=["All", "LOW", "MEDIUM", "HIGH", "CRITICAL"],
-            command=self.refresh_logs,
-            width=120
+
+class LogsTab(ctk.CTkFrame):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.pack(fill="both", expand=True)
+
+        header = ctk.CTkFrame(self)
+        header.pack(fill="x", padx=10, pady=10)
+
+        ctk.CTkLabel(header, text="📋 Event Logs", font=("Arial", 14, "bold"), text_color="#00ff00").pack(side="left", padx=10)
+
+        ctk.CTkLabel(header, text="Filter:").pack(side="left", padx=5)
+        self.severity_filter = ctk.CTkOptionMenu(
+            header,
+            values=["All", "CRITICAL", "HIGH", "MEDIUM", "LOW"],
+            command=self.on_filter_change,
+            width=80
         )
         self.severity_filter.pack(side="left", padx=5)
         self.severity_filter.set("All")
-        
-        # Buttons
-        button_frame = CTkFrame(control_frame, fg_color="#0a0a0a")
-        button_frame.pack(fill="x", padx=10, pady=5)
-        
-        refresh_btn = ctk.CTkButton(
-            button_frame,
+
+        ctk.CTkButton(
+            header,
+            text="🔒 Chain",
+            command=self.verify_integrity,
+            fg_color="#0066ff",
+            hover_color="#0088ff",
+            width=80
+        ).pack(side="left", padx=5)
+
+        self.integrity_label = ctk.CTkLabel(header, text="✓ OK", text_color="#00ff00", font=("Arial", 9))
+        self.integrity_label.pack(side="left", padx=10)
+
+        ctk.CTkButton(
+            header,
             text="🔄 Refresh",
             command=self.refresh_logs,
-            width=100,
-            fg_color="#0066ff",
-            hover_color="#0088ff"
-        )
-        refresh_btn.pack(side="left", padx=5)
-        
-        export_btn = ctk.CTkButton(
-            button_frame,
-            text="📥 Export CSV",
-            command=self.export_csv,
-            width=120,
             fg_color="#00aa00",
-            hover_color="#00dd00"
-        )
-        export_btn.pack(side="left", padx=5)
-        
-        clear_btn = ctk.CTkButton(
-            button_frame,
-            text="🗑️ Clear Old Events",
-            command=self.clear_old_events,
-            width=150,
-            fg_color="#cc0000",
-            hover_color="#ff0000"
-        )
-        clear_btn.pack(side="left", padx=5)
-        
-        # Log Table Header
-        header_frame = CTkFrame(self, fg_color="#0a0a0a")
-        header_frame.pack(fill="x", pady=5)
-        
-        CTkLabel(header_frame, text="Timestamp", font=("Arial", 10, "bold"), text_color="#00ff00", width=150).pack(side="left", padx=5)
-        CTkLabel(header_frame, text="Type", font=("Arial", 10, "bold"), text_color="#00ff00", width=150).pack(side="left", padx=5)
-        CTkLabel(header_frame, text="Severity", font=("Arial", 10, "bold"), text_color="#00ff00", width=100).pack(side="left", padx=5)
-        CTkLabel(header_frame, text="Details", font=("Arial", 10, "bold"), text_color="#00ff00").pack(side="left", padx=5, fill="x", expand=True)
-        
-        # Scrollable Log Area
-        self.log_frame = CTkScrollableFrame(self, fg_color="#1f1f1f")
-        self.log_frame.pack(fill="both", expand=True, pady=10)
-    
-    def refresh_logs(self, value=None):
-        """Fetch and display recent events"""
-        # Clear existing widgets
-        for widget in self.log_frame.winfo_children():
-            widget.destroy()
-        
-        # Get filter
-        severity = self.severity_filter.get()
-        severity = None if severity == "All" else severity
-        
-        # Fetch events
-        events = self.db.get_events(limit=100, severity=severity)
-        
-        if not events:
-            CTkLabel(
-                self.log_frame,
-                text="No events found",
-                text_color="#888888",
-                font=("Arial", 11)
-            ).pack(anchor="w", padx=10, pady=10)
-            return
-        
-        # Display event rows
-        for event in events:
-            row = CTkFrame(self.log_frame, fg_color="#0a0a0a")
-            row.pack(fill="x", padx=5, pady=2)
-            
-            # Get color based on severity
-            color = self._get_severity_color(event['severity'])
-            
-            # Timestamp
-            timestamp = event['timestamp'][:19] if event['timestamp'] else "N/A"
-            CTkLabel(row, text=timestamp, text_color=color, font=("Arial", 9), width=150).pack(side="left", padx=5)
-            
-            # Type
-            CTkLabel(row, text=event['event_type'], text_color=color, font=("Arial", 9), width=150).pack(side="left", padx=5)
-            
-            # Severity
-            CTkLabel(row, text=event['severity'], text_color=color, font=("Arial", 9, "bold"), width=100).pack(side="left", padx=5)
-            
-            # Details
-            details = event['details'][:60] if event['details'] else "N/A"
-            CTkLabel(row, text=details, text_color=color, font=("Arial", 9), wraplength=400).pack(side="left", padx=5, fill="x", expand=True)
-    
-    def export_csv(self):
-        """Export logs to CSV file"""
+            hover_color="#00dd00",
+            width=80
+        ).pack(side="right", padx=5)
+
+        self.content_frame = ctk.CTkFrame(self)
+        self.content_frame.pack(fill="both", expand=True, padx=10, pady=10)
+
+        self.events = []
+        self.refresh_logs()
+
+    def on_filter_change(self, value):
+        self.refresh_logs()
+
+    def refresh_logs(self):
+        def fetch_data():
+            try:
+                severity_filter = self.severity_filter.get()
+                if severity_filter == "All":
+                    return get_events(limit=100)
+                return get_events(limit=100, filter_severity=severity_filter)
+            except Exception:
+                return []
+
+        def update_ui(events):
+            self.events = events
+            self.draw_table()
+
+        def background_fetch():
+            events = fetch_data()
+            self.after(0, lambda: update_ui(events))
+
+        threading.Thread(target=background_fetch, daemon=True).start()
+
+    def draw_table(self):
         try:
-            filename = f"logs/threat_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-            self.db.export_events_csv(filename)
-            print(f"[LOGS] Exported to {filename}")
+            for widget in self.content_frame.winfo_children():
+                widget.destroy()
+
+            if not self.events:
+                ctk.CTkLabel(self.content_frame, text="No events", text_color="#888888").pack(pady=20)
+                return
+
+            for event in self.events[:50]:
+                severity = event.get("severity", "LOW")
+                severity_color = {
+                    "CRITICAL": "#ff0000",
+                    "HIGH": "#ff8800",
+                    "MEDIUM": "#ffff00",
+                }.get(severity, "#00ff00")
+
+                ts = event.get("timestamp", "N/A")
+                if "T" in str(ts):
+                    ts = ts.split("T")[1][:8]
+
+                text = f"[{severity}] {event.get('event_type', 'N/A')} - {ts}"
+                ctk.CTkLabel(
+                    self.content_frame,
+                    text=text,
+                    font=("Arial", 9),
+                    text_color=severity_color
+                ).pack(pady=2, anchor="w", padx=10)
+
         except Exception as e:
-            print(f"[LOGS] Export error: {e}")
-    
-    def clear_old_events(self):
-        """Clear events older than 30 days"""
-        try:
-            self.db.clear_old_events(days=30)
-            self.refresh_logs()
-            print("[LOGS] Old events cleared")
-        except Exception as e:
-            print(f"[LOGS] Clear error: {e}")
-    
-    @staticmethod
-    def _get_severity_color(severity: str) -> str:
-        """Get color based on severity"""
-        colors = {
-            "LOW": "#00ff00",
-            "MEDIUM": "#ffff00",
-            "HIGH": "#ff8800",
-            "CRITICAL": "#ff0000"
-        }
-        return colors.get(severity, "#ffffff")
+            print(f"❌ Error drawing: {e}")
+
+    def verify_integrity(self):
+        def check_chain():
+            try:
+                is_valid, message = verify_chain()
+                self.integrity_label.configure(
+                    text="✓ OK" if is_valid else "🚨 TAMPERED",
+                    text_color="#00ff00" if is_valid else "#ff0000"
+                )
+            except Exception:
+                pass
+
+        threading.Thread(target=check_chain, daemon=True).start()
