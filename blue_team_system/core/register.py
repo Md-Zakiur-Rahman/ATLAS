@@ -6,15 +6,20 @@ from core.auth import hash_password, generate_device_fingerprint
 
 REGISTER_FILE = "registered_user.json"
 
+DEFAULT_WHITELIST_PROCESSES = [
+    "chrome.exe", "code.exe", "python.exe",
+    "explorer.exe", "svchost.exe", "notepad.exe"
+]
+
+DEFAULT_WHITELIST_IPS = [
+    "127.0.0.1", "192.168.1.1"
+]
+
 def is_registered() -> bool:
     return os.path.exists(REGISTER_FILE)
 
 def register_user(name: str, email: str, password: str,
                   phone: str, telegram_id: str = "") -> bool:
-    """
-    One-time registration. Stores bcrypt hash, device fingerprint,
-    phone last 5 digits, and Telegram ID.
-    """
     try:
         if is_registered():
             print("[REGISTER] User already registered.")
@@ -33,8 +38,9 @@ def register_user(name: str, email: str, password: str,
             "telegram_id": telegram_id,
             "fingerprint_hash": fp_hash,
             "registered_at": time.time(),
-            "whitelist_processes": ["chrome.exe", "code.exe", "python.exe"],
-            "whitelist_ips": ["127.0.0.1"],
+            "whitelist_processes": DEFAULT_WHITELIST_PROCESSES.copy(),
+            "whitelist_ips": DEFAULT_WHITELIST_IPS.copy(),
+            "whitelist_paths": [],
         }
 
         with open(REGISTER_FILE, 'w') as f:
@@ -65,14 +71,14 @@ def update_telegram_id(telegram_id: str) -> bool:
 def get_whitelist() -> dict:
     user = load_user()
     if not user:
-        return {"processes": [], "ips": []}
+        return {"processes": [], "ips": [], "paths": []}
     return {
         "processes": user.get("whitelist_processes", []),
-        "ips": user.get("whitelist_ips", [])
+        "ips": user.get("whitelist_ips", []),
+        "paths": user.get("whitelist_paths", []),
     }
 
 def add_to_whitelist(category: str, value: str) -> bool:
-    """category: 'whitelist_processes' or 'whitelist_ips'"""
     user = load_user()
     if not user:
         return False
@@ -81,3 +87,25 @@ def add_to_whitelist(category: str, value: str) -> bool:
         with open(REGISTER_FILE, 'w') as f:
             json.dump(user, f, indent=2)
     return True
+
+def remove_from_whitelist(category: str, value: str) -> bool:
+    user = load_user()
+    if not user:
+        return False
+    if value in user.get(category, []):
+        user[category].remove(value)
+        with open(REGISTER_FILE, 'w') as f:
+            json.dump(user, f, indent=2)
+    return True
+
+def seed_demo_whitelist() -> None:
+    """
+    Call this during demo machine setup to pre-populate
+    the whitelist with safe processes and IPs.
+    """
+    add_to_whitelist("whitelist_processes", "chrome.exe")
+    add_to_whitelist("whitelist_processes", "code.exe")
+    add_to_whitelist("whitelist_processes", "python.exe")
+    add_to_whitelist("whitelist_ips", "127.0.0.1")
+    add_to_whitelist("whitelist_ips", "192.168.1.1")
+    print("[REGISTER] Demo whitelist seeded.")
