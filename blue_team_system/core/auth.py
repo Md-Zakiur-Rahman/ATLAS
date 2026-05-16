@@ -6,6 +6,25 @@ import os
 import time
 import bcrypt
 
+FAILED_ATTEMPTS: dict = {}  # username/session → count
+MAX_ATTEMPTS = 5
+
+def _publish_auth_event(event_type: str, severity: str, message: str) -> None:
+    """
+    Publishes auth events to event_bus if available.
+    Falls back to alert_manager_stub if event_bus not yet wired.
+    """
+    try:
+        from monitor.event_bus import publish
+        publish(event_type, severity, {"message": message, "timestamp": time.time()})
+    except Exception:
+        try:
+            from core.alert_manager_stub import dispatch_alert
+            dispatch_alert({"type": event_type, "severity": severity,
+                            "message": message, "timestamp": time.time()})
+        except Exception:
+            print(f"[AUTH EVENT] {severity} | {event_type} | {message}")
+
 def hash_password(password: str) -> bytes:
     return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
 
@@ -27,10 +46,12 @@ def save_auth(password: str, filepath: str = "auth.dat") -> str:
         f.write(pw_hash + b'\n' + fp_hash.encode())
     return fingerprint
 
-def verify_auth(password: str, filepath: str = "auth.dat", dev_mode: bool = False) -> tuple[bool, dict | None]:
+def verify_auth(password: str, filepath: str = "auth.dat",
+                dev_mode: bool = False, session_id: str = "default") -> tuple[bool, dict | None]:
     """
-    Returns (success: bool, alert: dict | None)
-    alert is set when device fingerprint mismatches.
+    Returns (success, alert | None).
+    Tracks failed attempts per session. Publishes AUTH_FAIL to event_bus.
+    Locks vault after MAX_ATTEMPTS failures.
     """
     if not os.path.exists(filepath):
         raise FileNotFoundError("Auth file not found. Run save_auth() first.")
@@ -42,9 +63,24 @@ def verify_auth(password: str, filepath: str = "auth.dat", dev_mode: bool = Fals
     saved_fp_hash = lines[1].decode()
 
     if not verify_password(password, pw_hash):
+        FAILED_ATTEMPTS[session_id] = FAILED_ATTEMPTS.get(session_id, 0) + 1
+        count = FAILED_ATTEMPTS[session_id]
+        _publish_auth_event("AUTH_FAIL", "HIGH",
+                            f"Failed login attempt {count}/{MAX_ATTEMPTS} for session '{session_id}'")
+        if count >= MAX_ATTEMPTS:
+            _publish_auth_event("AUTH_BRUTE_FORCE", "CRITICAL",
+                                f"Max failed attempts reached for session '{session_id}'. Locking vault.")
+            try:
+                from core.vault import lock
+                lock(reason=f"Brute force detected on session '{session_id}'")
+            except Exception as e:
+                print(f"[AUTH] Vault lock failed: {e}")
         return False, None
 
     if dev_mode:
+        FAILED_ATTEMPTS[session_id] = 0
+        _publish_auth_event("AUTH_SUCCESS", "LOW",
+                            f"Successful login (dev_mode) for session '{session_id}'")
         return True, None
 
     current_fp = generate_device_fingerprint()
@@ -57,7 +93,13 @@ def verify_auth(password: str, filepath: str = "auth.dat", dev_mode: bool = Fals
             "timestamp": time.time(),
             "message": "Login attempted from unrecognized device. Access denied."
         }
-        print(f"[AUTH ALERT] {alert['message']}")
+        _publish_auth_event("DEVICE_MISMATCH", "HIGH", alert["message"])
         return False, alert
 
+    FAILED_ATTEMPTS[session_id] = 0
+    _publish_auth_event("AUTH_SUCCESS", "LOW",
+                        f"Successful login for session '{session_id}'")
     return True, None
+
+def reset_attempts(session_id: str = "default") -> None:
+    FAILED_ATTEMPTS[session_id] = 0

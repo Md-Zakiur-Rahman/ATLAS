@@ -1,11 +1,30 @@
 import os
+import time
 from core.encryptor import encrypt_folder, decrypt_folder
 from core.key_manager import get_or_create_key, rotate_key
 from core.alert_manager_stub import dispatch_alert
-import time
 
 VAULT_FLAG = "vault.locked"
 KEYFILE_PATH = "vault.keyfile"
+
+def lock(reason: str = "Manual lock", password: str = None, folder: str = None) -> None:
+    """
+    Called by response_engine on CRITICAL. Password and folder optional —
+    if not provided, reads from config. Dispatch alert automatically.
+    """
+    with open(VAULT_FLAG, 'w') as f:
+        f.write(reason)
+    dispatch_alert({
+        "type": "VAULT_LOCKED",
+        "severity": "CRITICAL",
+        "timestamp": time.time(),
+        "message": f"Vault locked. Reason: {reason}"
+    })
+    print(f"[VAULT] Locked. Reason: {reason}")
+    if folder and password:
+        key, _ = get_or_create_key(password, KEYFILE_PATH)
+        count = encrypt_folder(folder, key)
+        print(f"[VAULT] Encrypted {count} files.")
 
 def lock_vault(folder: str, password: str, reason: str = "Manual lock") -> None:
     key, _ = get_or_create_key(password, KEYFILE_PATH)
