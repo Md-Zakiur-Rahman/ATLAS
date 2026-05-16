@@ -1,0 +1,11 @@
+.env
+
+__pycache__/
+
+*.pyc
+
+dist/
+
+build/
+
+assets/model.pkl

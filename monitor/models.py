@@ -2,7 +2,8 @@ from enum import Enum
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Dict, Any
-
+from dataclasses import dataclass, field
+import time
 
 class ThreatLevel(Enum):
 
@@ -46,16 +47,15 @@ class SecurityEvent:
 
     event_type: str
 
-    severity: ThreatLevel
-
     path: str = ""
 
-    payload: Dict[str, Any] = field(
-        default_factory=dict
-    )
+    timestamp: float = field(default_factory=time.time)
 
-    created_at: float = 0
+    payload: dict = field(default_factory=dict)
 
-    processed_at: float = 0
+    severity: str = "LOW"
 
-    alerted_at: float = 0
+    created_at: float = field(default_factory=time.time)
+
+    processed_at: float = 0.0
+    

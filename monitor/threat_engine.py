@@ -8,12 +8,15 @@ import os
 import logging
 import time
 from collections import deque
-from dataclasses import dataclass
+
 from typing import Deque, Dict, Optional
 
 from monitor import rules
 from monitor.alert_manager import AlertManager
-from monitor.models import ThreatLevel
+from monitor.models import (
+    ThreatLevel,
+    SecurityEvent
+)
 from datetime import datetime
 from monitor.event_bus import event_bus
 
@@ -25,12 +28,6 @@ logging.basicConfig(
 logger = logging.getLogger("ATLAS-ThreatEngine")
 
 
-@dataclass
-class SecurityEvent:
-    event_type: str
-    path: str
-    timestamp: float
-    payload: Dict
 
 
 class ThreatEngine:
@@ -238,32 +235,32 @@ class ThreatEngine:
                 break
 
     def _analyze_file_events(self) -> None:
-        
-        filename = os.path.basename(
+        for event in self.recent_events:
+            filename = os.path.basename(
             event.path
-        ).lower()
+            ).lower()
 
-        sensitive_keywords_detected = any(
-            keyword in filename
-            for keyword in rules.HONEYPOT_KEYWORDS
-        )
-
-        if sensitive_keywords_detected:
-
-            self._update_threat_score(
-                "OFF_HOURS_ACTIVITY"
+            sensitive_keywords_detected = any(
+                keyword in filename
+                for keyword in rules.HONEYPOT_KEYWORDS
             )
 
-            self._trigger_alert(
-                rule_key="honeypot_behavior",
-                cooldown_seconds=15,
-                severity=ThreatLevel.HIGH,
-                title="Sensitive File Targeting Detected",
-                details=(
-                    f"Suspicious interaction with "
-                    f"sensitive-looking file: {filename}"
-                ),
-            )
+            if sensitive_keywords_detected:
+
+                self._update_threat_score(
+                    "OFF_HOURS_ACTIVITY"
+                )
+
+                self._trigger_alert(
+                    rule_key="honeypot_behavior",
+                    cooldown_seconds=15,
+                    severity=ThreatLevel.HIGH,
+                    title="Sensitive File Targeting Detected",
+                    details=(
+                        f"Suspicious interaction with "
+                        f"sensitive-looking file: {filename}"
+                    ),
+                )
         if self._is_off_hours_activity():
 
             self._update_threat_score(
@@ -350,6 +347,42 @@ class ThreatEngine:
             )
 
     def _analyze_system_event(self, event: SecurityEvent) -> None:
+        if event.event_type == "ML_ANOMALY":
+
+            severity = event.payload.get(
+        "severity",
+        "LOW"
+        )
+
+            score = event.payload.get(
+        "score",
+        0
+        )
+
+            logger.warning(
+        "ML Threat Detected | "
+        "Score: %.4f | %s",
+        score,
+        severity,
+        )
+
+            self._trigger_alert(
+        rule_key="ml_anomaly",
+
+        cooldown_seconds=15,
+
+        severity=ThreatLevel[
+            severity
+        ],
+
+        title="ML Behavioral Anomaly",
+
+        details=(
+            f"Anomaly score: {score}"
+        ),
+    )
+
+            return
         if event.event_type == "USB_DEVICE_CONNECTED":
 
             device = event.payload.get(
@@ -370,6 +403,7 @@ class ThreatEngine:
             )
 
             return
+        
         process_name = event.payload.get("process_name", event.path)
         normalized_name = process_name.lower()
 
@@ -410,27 +444,7 @@ class ThreatEngine:
 
         return None
 
-    def _is_duplicate_event(self, event: SecurityEvent) -> bool:
-        """
-        Simple duplicate suppression: return True when a recent identical event
-        (same type and path) exists within a short time window.
-        """
-
-        now = time.time()
-        # 1 second window for duplicate suppression
-        dup_window = 1.0
-
-        for recent in reversed(self.recent_events):
-            if recent.event_type == event.event_type and recent.path == event.path:
-                if abs(now - recent.timestamp) <= dup_window:
-                    logger.debug(
-                        "Duplicate event suppressed: %s %s",
-                        event.event_type,
-                        event.path,
-                    )
-                    return True
-
-        return False
+    
 
     def _matching_suspicious_extension(self, path: str) -> Optional[str]:
         lowered_path = path.lower()
