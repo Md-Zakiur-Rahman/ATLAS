@@ -20,7 +20,7 @@ with real-time defensive monitoring, built for a 5-day cybersecurity sprint.
 ## Setup
 
 1. Clone the repo:
-   git clone https://github.com/.../ATLAS.git
+   git clone https://github.com/Md-Zakiur-Rahman/ATLAS.git
    cd ATLAS/blue_team_system
 
 2. Create a virtual environment:
