@@ -141,6 +141,7 @@ class BlueTeamApp(ctk.CTk):
         login_btn = ctk.CTkButton(login_panel, text="🔓 Login", command=login_action, width=300, height=40, font=("Arial", 14, "bold"), fg_color="#00aa00", hover_color="#00dd00")
         login_btn.pack(pady=20)
         
+        
         def demo_mode():
             self.is_logged_in = True
             self.current_user = "demo_user"
@@ -151,10 +152,23 @@ class BlueTeamApp(ctk.CTk):
         
         demo_btn = ctk.CTkButton(login_panel, text="🎮 Demo Mode", command=demo_mode, width=300, height=35, font=("Arial", 12), fg_color="#0066ff", hover_color="#0088ff")
         demo_btn.pack(pady=10)
+
+    def clear_demo_network_rows(self):
+        try:
+            rows = db_manager.get_network_connections(limit=100)
+            for row in rows:
+                if row.get("process") in ("chrome.exe", "unknown.exe") and row.get("remote_ip") in ("8.8.8.8", "1.2.3.4"):
+                    try:
+                        db_manager.supabase.table("network_connections").delete().eq("id", row["id"]).execute()
+                    except Exception as e:
+                        print(f"[APP] Failed deleting demo row {row.get('id')}: {e}")
+        except Exception as e:
+            print(f"[APP] clear_demo_network_rows error: {e}")
     
     def _load_demo_data(self):
         print("[APP] Loading demo data to Supabase...")
-        
+        self.clear_demo_network_rows()
+
         def load_in_thread():
             try:
                 db_manager.log_event(event_type="LOGIN_SUCCESS", severity="LOW", details={"username": "demo_user"}, category="AUTH")
@@ -167,9 +181,41 @@ class BlueTeamApp(ctk.CTk):
                 print("[APP] Demo data loaded successfully")
             except Exception as e:
                 print(f"[APP] Error loading demo data: {e}")
-        
-        thread = threading.Thread(target=load_in_thread, daemon=True)
-        thread.start()
+
+        threading.Thread(target=load_in_thread, daemon=True).start()
+
+    def handle_critical_connection(self, data):
+        print("[APP] Critical network event:", data)
+        try:
+            if hasattr(self, "threat_label") and self.threat_label:
+                self.threat_label.configure(
+                    text=f"Status: THREAT {data.get('ip', 'N/A')}",
+                    text_color="#ff0000"
+                )
+
+            if hasattr(self, "user_label") and self.user_label:
+                self.user_label.configure(
+                    text=f"Alert: {data.get('process', 'N/A')} -> {data.get('ip', 'N/A')}:{data.get('port', 'N/A')}",
+                    text_color="#ff8800"
+                )
+
+            if hasattr(self, "logs_tab") and self.logs_tab and hasattr(self.logs_tab, "events"):
+                self.logs_tab.events.insert(0, {
+                    "event_type": "CRITICAL_NETWORK",
+                    "severity": "CRITICAL",
+                    "category": "NETWORK",
+                    "timestamp": "NOW",
+                    "details": data
+                })
+                if hasattr(self.logs_tab, "draw_table"):
+                    self.logs_tab.draw_table()
+
+            if hasattr(self, "network_tab") and self.network_tab and hasattr(self.network_tab, "seen_events"):
+                self.network_tab.seen_events.add(
+                    f"{data.get('ip', 'N/A')}|{data.get('port', 'N/A')}|{data.get('process', 'N/A')}|{data.get('city', 'N/A')}|{data.get('country', 'N/A')}"
+                )
+        except Exception as e:
+            print(f"[APP] handle_critical_connection error: {e}")
     
     def _show_dashboard(self):
         for widget in self.content_frame.winfo_children():
@@ -209,7 +255,7 @@ class BlueTeamApp(ctk.CTk):
         
         try:
             self.timeline_tab = TimelineTab(tabview.tab("Timeline"))
-            self.network_tab = NetworkTab(tabview.tab("Network"))
+            self.network_tab = NetworkTab(tabview.tab("Network"), on_critical_connection=self.handle_critical_connection)
             self.encrypt_tab = EncryptTab(tabview.tab("Encrypt/Decrypt"))
             self.logs_tab = LogsTab(tabview.tab("Event Log"))
             self.report_tab = ReportTab(tabview.tab("Reports"))
