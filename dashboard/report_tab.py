@@ -3,7 +3,7 @@ from customtkinter import CTkLabel, CTkFrame, CTkButton
 import threading
 import os
 from database.db_manager import get_events, get_threats, export_events_csv
-from pdf_generator import PDFReportGenerator
+from dashboard.pdf_generator import PDFReportGenerator
 
 class ReportTab(ctk.CTkFrame):
     def __init__(self, parent):
