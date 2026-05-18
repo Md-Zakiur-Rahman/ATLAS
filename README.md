@@ -1,227 +1,228 @@
-# ATLAS — Adaptive Threat Level Assessment & Security System
+# 🛡️ ATLAS — Adaptive Threat Level Assessment & Security System
 
-ATLAS is a modular, Blue Team-oriented security platform providing monitoring, detection, and response tooling. This repository contains the Detection & Monitoring core plus supporting API, auth, notification, database, and simulator components.
+ATLAS is a modular, Blue Team-oriented security platform combining real-time monitoring, ML-based anomaly detection, and a modern GUI dashboard. Built for security teams who need actionable intelligence fast.
 
-**Quick links**
-- **Main launcher:** [main.py](main.py)
-- **API:** [api/flask_app.py](api/flask_app.py)
-- **Configuration example:** [config/secrets.example.py](config/secrets.example.py)
-- **Current config (local):** [config/secrets.py](config/secrets.py) — DO NOT commit production secrets
+## 📋 Table of Contents
+- [Overview](#overview)
+- [Features](#features)
+- [Project Structure](#project-structure)
+- [Installation](#installation)
+- [Usage](#usage)
+- [Architecture](#architecture)
+- [Database](#database)
+- [API](#api)
+- [Tests](#tests)
+- [Building for Windows](#building-for-windows)
 
-## Key Features
+## 🎯 Overview
 
-- Real-time filesystem monitoring (watchdog)
-- Process and system inspection (psutil)
-- Thread-safe event bus and threat severity classification
-- ML-based anomaly scoring and training lifecycle (monitor/ml_detector.py)
-- HTTP API with rate limiting and remote lock endpoint
-- Simulator tooling for testing attack scenarios
+ATLAS is a comprehensive Blue Team Threat Detection System that monitors, analyzes, and responds to security threats in real-time. It combines a CustomTkinter GUI dashboard with a Python backend featuring filesystem monitoring, ML anomaly scoring, network monitoring, Flask API, and Supabase cloud storage.
 
-## Repository layout
+## ✨ Features
 
-- [monitor/](monitor): core monitors, detectors, threat engine, feature extractor
-- [api/](api): Flask API and endpoints
-- [auth/](auth): authentication helpers, OTP and session management
-- [database/](database): Supabase client and DB manager
-- [notifications/](notifications): email sending and notification manager
-- [simulator/](simulator): attacker simulation scripts and test targets
-- [tests/](tests): unit tests (unittest)
+- **Real-Time Filesystem Monitoring** — watchdog-based file event capture
+- **ML Anomaly Scoring** — Isolation Forest model with auto-calibrated thresholds
+- **Process & System Inspection** — psutil-based process monitoring
+- **Thread-Safe Event Bus** — decoupled pub/sub architecture
+- **Hash-Chain Tamper Detection** — cryptographic log integrity verification
+- **Network Monitoring** — connection tracking with IP threat flagging
+- **Interactive Timeline Visualization** — matplotlib scatter with event detail cards
+- **File Encryption/Decryption** — AES-256 secure file operations
+- **Automated Report Generation** — PDF threat reports via ReportLab
+- **Email & Notification Alerts** — Resend SMTP for security event alerts
+- **HTTP API** — Flask with rate limiting and remote lock endpoint
+- **Attack Simulator** — 5-phase attack simulation for demo and testing
+- **Device Fingerprinting** — identify and track devices
+- **Windows Installer** — standalone executable with InnoSetup
 
-## File structure
-
-A high-level view of the repository layout:
+## 📁 Project Structure
 
 ```text
 ATLAS/
-	attack_simulator.py
-	main.py
-	README.md
-	requirements.txt
-	test_ml.py
-	api/
-		__init__.py
-		flask_app.py
-		assets/
-			feature_history.json
-			training_state.json
-	auth/
-		auth_controller.py
-		otp_manager.py
-		session_manager.py
-	config/
-		secrets.example.py
-		secrets.py
-	core/
-		session.py
-	database/
-		__init__.py
-		client.py
-		db_manager.py
-	monitor/
-		__init__.py
-		alert_manager.py
-		event_bus.py
-		feature_extractor.py
-		file_monitor.py
-		ml_detector.py
-		models.py
-		network_monitor.py
-		process_monitor.py
-		rename_log.py
-		response_engine.py
-		rules.py
-		threat_engine.py
-		usb_monitor.py
-	notifications/
-		__init__.py
-		email_sender.py
-		manager.py
-		test_send.py
-	simulator/
-		__init__.py
-		attack_remote.py
-		attack_sim.py
-		sim_config.json
-		test_targets/
-			sensitive_data_0.txt
-			sensitive_data_1.txt
-			...
-	tests/
-		test_event_bus.py
-		test_otp.py
-		test_supabase.py
-		test_threat_engine.py
-		test_verify.py
+├── main.py                        # Main entry point
+├── attack_simulator.py            # Top-level attack simulator
+├── requirements.txt
+├── README.md
+│
+├── api/                           # Flask API
+│   ├── flask_app.py
+│   └── assets/
+│       ├── feature_history.json
+│       └── training_state.json
+│
+├── auth/                          # Auth helpers
+│   ├── auth_controller.py
+│   ├── otp_manager.py
+│   └── session_manager.py
+│
+├── config/
+│   ├── secrets.example.py
+│   └── secrets.py                 # DO NOT COMMIT
+│
+├── core/
+│   └── session.py
+│
+├── dashboard/                     # GUI Layer (CustomTkinter)
+│   ├── app.py
+│   ├── dashboard_tab.py
+│   ├── logs_tab.py
+│   ├── timeline_tab.py
+│   ├── network_tab.py
+│   ├── encrypt_tab.py
+│   ├── report_tab.py
+│   ├── settings_tab.py
+│   ├── alerts.py
+│   ├── animations.py
+│   ├── ui_polish.py
+│   └── pdf_generator.py
+│
+├── database/                      # Supabase layer
+│   ├── client.py
+│   ├── db_manager.py
+│   └── schema.sql
+│
+├── monitor/                       # Detection core
+│   ├── event_bus.py
+│   ├── file_monitor.py
+│   ├── process_monitor.py
+│   ├── network_monitor.py
+│   ├── usb_monitor.py
+│   ├── threat_engine.py
+│   ├── alert_manager.py
+│   ├── response_engine.py
+│   ├── ml_detector.py
+│   ├── feature_extractor.py
+│   ├── rename_log.py
+│   ├── rules.py
+│   └── models.py
+│
+├── notifications/                 # Email alerts
+│   ├── manager.py
+│   └── email_sender.py
+│
+├── simulator/                     # Attack simulation
+│   ├── attack_sim.py
+│   ├── attack_remote.py
+│   ├── sim_config.json
+│   └── test_targets/
+│
+├── logs/                          # Generated exports
+│   ├── events_export_*.csv
+│   └── threat_report_*.csv
+│
+├── tests/
+│   ├── test_event_bus.py
+│   ├── test_otp.py
+│   ├── test_supabase.py
+│   ├── test_threat_engine.py
+│   └── test_verify.py
+│
+├── build_windows.bat
+├── build_windows.ps1
+└── build.spec
 ```
 
-## Prerequisites
+## 🚀 Installation
 
-- Python 3.10
-- Install dependencies:
+### Prerequisites
+- Python 3.10+
+- Internet connection (Supabase)
+- Supabase account (free tier)
 
+### Setup
+
+1. **Clone the repository**
+```bash
+git clone https://github.com/Md-Zakiur-Rahman/ATLAS.git
+cd ATLAS
+```
+
+2. **Install dependencies**
 ```bash
 py -3.10 -m pip install -r requirements.txt
 ```
 
-Note: `requirements.txt` may contain project-specific GUI or optional deps; install in a virtual environment.
+3. **Configure environment variables**
+SUPABASE_URL=your_supabase_url
+SUPABASE_KEY=your_supabase_key
+RESEND_API_KEY=your_resend_key
+SMTP_FROM=onboarding@resend.dev
+4. **Initialize the database**
+Run `database/schema.sql` in your Supabase project.
 
-## Configuration
-
-Copy or set environment variables based on [config/secrets.example.py](config/secrets.example.py). Important configuration keys:
-
-- `SUPABASE_URL` and `SUPABASE_KEY` (Supabase project)
-- `RESEND_API_KEY` or SMTP settings for email OTP delivery
-- `SMTP_FROM` default sender address
-
-Do not commit real keys into the repository. Use environment variables or an ignored `config/secrets.py` for local development.
-
-## Running ATLAS (monitoring)
-
-Start the main launcher:
-
+5. **Run the application**
 ```bash
 py -3.10 main.py
 ```
 
-Training mode (collect baseline telemetry and train ML model):
+## 💻 Usage
 
+### Normal mode
+```bash
+py -3.10 main.py
+```
+
+### Training mode (ML baseline)
 ```bash
 py -3.10 main.py --train --train-days 1.0
 ```
 
-Notes:
-- The launcher starts file, process, and USB monitors, the feature extractor, and the ML lifecycle.
-- If no calibrated ML model is present the system runs in rule-based detection mode and logs a warning with instructions to run the `--train` flag.
+### Demo mode
+Launch with demo credentials to explore all features without live Supabase.
 
-## API
+## 🏗️ Architecture
 
-Start the Flask API locally:
+| Layer | Technology | Purpose |
+|---|---|---|
+| UI | CustomTkinter 5.2.0 | Modern Python GUI |
+| Database | Supabase (PostgreSQL) | Cloud storage |
+| Backend | Python 3.10+ | Core logic |
+| ML | scikit-learn | Isolation Forest anomaly detection |
+| Reports | ReportLab | PDF generation |
+| Visualization | Matplotlib | Charts & graphs |
+| Alerts | Resend SMTP | Email notifications |
+| API | Flask | Remote lock & auth endpoints |
+
+## 🗄️ Database
+
+### Supabase Tables
+- `events` — event logging with hash-chaining
+- `threats` — threat records and analysis
+- `network_connections` — network activity logs
+- `auth` — user authentication data
+- `rename_log` — file rename tracking for ransomware detection
+- `notifications` — security alert audit trail
+- `otp_sessions` — OTP code tracking
+
+## 🌐 API
 
 ```bash
 python -m api.flask_app
 ```
 
-Main endpoints:
+| Endpoint | Method | Description |
+|---|---|---|
+| `/health` | GET | Health check |
+| `/auth-verify` | POST | Verify credentials |
+| `/auth-otp` | POST | Send OTP email |
+| `/remote-lock` | GET | Trigger remote vault lock |
 
-- `GET /health` — basic health check
-- `POST /auth-verify` — body JSON `{ "email": "...", "password": "..." }` (verifies credentials)
-- `POST /auth-otp` — body JSON `{ "email": "..." }` (sends OTP email)
-- `GET /remote-lock?token=...` — consume OTP session and trigger remote vault lock
-
-The API applies rate-limiting and publishes security events to the internal event bus on notable actions (auth failures, rate limit breaches, remote locks).
-
-## Simulator
-
-Simulator scripts under [simulator/](simulator) and top-level `attack_simulator.py` provide attack scenarios and test targets located in `simulator/test_targets/`.
-
-## Tests
-
-Unit tests use the standard library `unittest`. Run tests with:
+## 🧪 Tests
 
 ```bash
 python -m unittest discover
 ```
 
-Or run an individual test file, e.g.:
+## 📦 Building for Windows
 
 ```bash
-python -m unittest tests.test_event_bus
+python -m PyInstaller build.spec
+# or
+build_windows.bat
 ```
 
-## Development notes
+## 🔒 Security & Privacy
 
-- ML telemetry and model state are managed by `monitor/ml_detector.py` and persisted by the project (see `api/assets/feature_history.json` and `api/assets/training_state.json`).
-- Logging is configured in `main.py` and `api/flask_app.py` — adjust levels as needed for debugging.
-- The event bus (`monitor/event_bus.py`) is the primary integration point for monitors, detectors, and response components.
-
-## Security & privacy
-
-- Remove or rotate the keys found in `config/secrets.py` before publishing or sharing the repository.
-- Use least-privileged service keys for Supabase and email services.
-
-## Contributing
-
-- Fork the repo, create a branch, and open a PR with a short description of changes.
-- Run unit tests and linters before submitting.
-
-## Integration & Merge Guide (for Member A / C integration)
-
-This section helps when merging this Detection & Monitoring core (Member B) with other branches (A, C). Follow these steps to minimize conflicts and preserve clear boundaries.
-
-- **Keep interfaces stable:** only change public interfaces after coordinating across teams. Public interfaces include:
-	- Event bus message schema and published event `type` values (see `monitor/event_bus.py`).
-	- HTTP API endpoints and request/response shapes (see `api/flask_app.py`).
-	- Configuration keys in `config/secrets.example.py`.
-- **Small, focused PRs:** prefer multiple small PRs over one large merge to make reviews and conflict resolution easier.
-- **Merge workflow (recommended):**
-	1. Fetch latest from `main` (or target integration branch) and rebase your feature branch: `git fetch origin && git rebase origin/main`.
- 2. Resolve conflicts locally, run unit tests, and verify the ML training path if affected.
- 3. Push and open a PR; request review from owners of Member A and Member C changes.
-- **Conflict priorities:** when an API/schema conflict exists, prefer keeping backwards-compatible behavior and add migration steps in the PR notes.
-- **Testing after merge:** run `py -3.10 main.py --train --train-days 0.01` (short run) and `python -m unittest discover` to validate runtime and tests.
-
-### Public-interface checklist
-
-- `monitor/event_bus.py`: list of event `type` strings consumed by `ThreatEngine` and `response_engine`.
-- `monitor/ml_detector.py`: model persistence format and `feature_history` shape.
-- `api/flask_app.py`: endpoints `POST /auth-verify`, `POST /auth-otp`, `GET /remote-lock` and rate limiting behavior.
-- `config/secrets.example.py`: ensure new config keys are added here and not only in `config/secrets.py`.
-
-### Pre-merge checklist
-
-- [ ] Rebase onto target branch and resolve conflicts locally.
-- [ ] Run `python -m unittest discover` and fix failing tests.
-- [ ] Verify API endpoints with a local run of the Flask app.
-- [ ] Verify ML training path if changes touch `monitor/ml_detector.py` or `monitor/feature_extractor.py`.
-- [ ] Add migration notes to PR if public interfaces changed.
-
----
-
----
-
-If you'd like, I can also:
-- add a small usage snippet showing a recommended development setup (venv + pip)
-- add environment-variable examples or a `.env.sample`
-- run the unit tests locally and report results
-
-Files updated: [README.md](README.md)
+- Never commit `config/secrets.py` or `.env`
+- Use service role key for Supabase backend only
+- Rotate keys before sharing or publishing the repo
