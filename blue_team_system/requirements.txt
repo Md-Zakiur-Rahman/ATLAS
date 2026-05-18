@@ -1,0 +1,9 @@
+customtkinter
+cryptography
+watchdog
+psutil
+matplotlib
+bcrypt
+pyinstaller
+supabase
+python-dotenv
