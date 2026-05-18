@@ -62,6 +62,42 @@ class NetworkMonitor:
             threading.Event()
         )
 
+        self.ip_blacklist: Set[str] = set()
+
+    def get_ip_geo(self, ip: str) -> dict:
+        try:
+            import requests
+
+            response = requests.get(
+                f"http://ip-api.com/json/{ip}",
+                timeout=3
+            )
+            data = response.json()
+            if data.get("status") == "success":
+                return {
+                    "city": data.get("city", "Unknown"),
+                    "country": data.get("country", "Unknown"),
+                    "region": data.get("regionName", "Unknown"),
+                    "isp": data.get("isp", "Unknown"),
+                    "lat": data.get("lat"),
+                    "lon": data.get("lon"),
+                }
+        except Exception as error:
+            logger.debug("Geo-lookup failed for %s: %s", ip, error)
+
+        return {
+            "city": "Unknown",
+            "country": "Unknown",
+            "region": "Unknown",
+            "isp": "Unknown",
+            "lat": None,
+            "lon": None,
+        }
+
+    def blacklist_ip(self, ip: str) -> None:
+        self.ip_blacklist.add(ip)
+        logger.warning("IP blacklisted: %s", ip)
+
     def start(self) -> None:
 
         logger.info(
@@ -159,25 +195,65 @@ class NetworkMonitor:
                     ):
                         suspicious = True
 
-                    event_bus.publish(
-                        {
-                            "type": (
-                                "NETWORK_CONNECTION"
-                            ),
-                            "remote_ip": remote_ip,
-                            "remote_port": remote_port,
-                            "process_name": process_name,
-                            "pid": pid,
-                            "suspicious": suspicious,
-                            "severity": (
-                                    "HIGH"
-                                    if suspicious
-                                    else "LOW"
+                    if remote_ip in self.ip_blacklist:
+                        logger.warning(
+                            "Blocked blacklisted IP connection: %s",
+                            remote_ip,
+                        )
+                        continue
+
+                    if suspicious:
+                        geo = self.get_ip_geo(remote_ip)
+
+                        event_bus.publish(
+                            {
+                                "type": (
+                                    "NETWORK_CONNECTION"
                                 ),
-                            "timestamp": time.time(),
-                            "created_at": time.time(),
-                        }
-                    )
+                                "remote_ip": remote_ip,
+                                "remote_port": remote_port,
+                                "process_name": process_name,
+                                "pid": pid,
+                                "suspicious": suspicious,
+                                "severity": (
+                                        "HIGH"
+                                        if suspicious
+                                        else "LOW"
+                                    ),
+                                "city": geo.get("city"),
+                                "country": geo.get("country"),
+                                "region": geo.get("region"),
+                                "isp": geo.get("isp"),
+                                "timestamp": time.time(),
+                                "created_at": time.time(),
+                            }
+                        )
+
+                    else:
+
+                        event_bus.publish(
+                            {
+                                "type": (
+                                    "NETWORK_CONNECTION"
+                                ),
+                                "remote_ip": remote_ip,
+                                "remote_port": remote_port,
+                                "process_name": process_name,
+                                "pid": pid,
+                                "suspicious": suspicious,
+                                "severity": (
+                                        "HIGH"
+                                        if suspicious
+                                        else "LOW"
+                                    ),
+                                "city": None,
+                                "country": None,
+                                "region": None,
+                                "isp": None,
+                                "timestamp": time.time(),
+                                "created_at": time.time(),
+                            }
+                        )
 
                     if suspicious:
 

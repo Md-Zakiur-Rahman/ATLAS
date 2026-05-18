@@ -73,7 +73,7 @@ class ThreatEngine:
                 )
             )
 
-            logger.info(
+            logger.debug(
                 "Detection Latency: %.4f sec",
                 latency
             )

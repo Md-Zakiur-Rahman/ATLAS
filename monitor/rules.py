@@ -176,6 +176,19 @@ USB_SCAN_INTERVAL_SECONDS = 5
 
 USB_ALERT_COOLDOWN_SECONDS = 30
 
+HONEYPOT_KEYWORDS = (
+    "backup",
+    "confidential",
+    "credential",
+    "credentials",
+    "finance",
+    "important",
+    "password",
+    "private",
+    "secret",
+    "wallet",
+)
+
 HONEYPOT_MAX_DEPTH = 4
 
 HONEYPOT_EXCLUDED_DIRECTORIES = (

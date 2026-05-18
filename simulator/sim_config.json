@@ -1,0 +1,13 @@
+{
+    "target_ip": "192.168.1.100",
+    "target_port": 4444,
+    "auth_endpoint": "http://127.0.0.1:5000/auth-verify",
+    "attack_folder": "D:/ATLAS/simulator/test_targets",
+    "file_count": 40,
+    "brute_force_attempts": 8,
+    "port_scan_ports": [22, 80, 443, 3389, 5000],
+    "revert_delay_seconds": 10,
+    "c2_port": 4444,
+    "safe_mode": true,
+    "phase_delay_seconds": 2
+}

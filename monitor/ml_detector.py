@@ -3,26 +3,6 @@ ATLAS ML Detector
 
 Adaptive anomaly detection using
 Isolation Forest.
-
-FIXES APPLIED (Day 6):
-  1. __init__ moved to top of class.
-  2. contamination lowered 0.05 → 0.01.
-  3. MIN_SAMPLES raised 10 → 60.
-  4. Thresholds recalibrated.
-  5. get_severity_from_score indentation fixed.
-  6. analyze_latest_features logs every cycle.
-
-ADDED:
-  - WEEKLY_MIN_SAMPLES floor for auto retrain.
-  - save_history() / load_history() so vectors
-    survive app restarts.
-  - schedule_retraining() wires weekly Sunday
-    retrain + bi-monthly reset + hourly save.
-  - _silent_retrain() for weekly retrain.
-  - _bimonthly_reset() for full reset every
-    2 months on even month 1st at 03:00.
-
-DAY 8 TODOs marked with: # ── TODO D8 ──
 """
 
 import json
@@ -40,9 +20,13 @@ from sklearn.ensemble import IsolationForest
 from monitor.event_bus import event_bus
 from monitor.feature_extractor import feature_extractor
 
-# ── TODO D8 ─────────────────────────────
-# from notifications.telegram_bot import telegram_bot
-# ────────────────────────────────────────
+INITIAL_MIN_SAMPLES = 1440
+MIN_SAMPLES = 60
+PARTIAL_MODEL_FLAG = "assets/partial_model.flag"
+
+MODEL_PATH = "assets/model.pkl"
+HISTORY_PATH = "assets/feature_history.json"
+TRAINING_STATE_PATH = "assets/training_state.json"
 
 logging.basicConfig(
     level=logging.INFO,
@@ -55,46 +39,29 @@ logging.basicConfig(
 
 logger = logging.getLogger("ATLAS-MLDetector")
 
-# ── FIX 3 ────────────────────────────────
-# Minimum samples for --train mode.
-# 60 samples ≈ 10 minutes of collection.
-MIN_SAMPLES = 60
-
-# Minimum samples for weekly auto retrain.
-# 500 ≈ roughly 1.5 hours of data — enough
-# to capture a realistic daily pattern.
-# The deque maxlen=1000 caps the ceiling.
-WEEKLY_MIN_SAMPLES = 500
-
-# File paths
-MODEL_PATH   = "assets/model.pkl"
-HISTORY_PATH = "assets/feature_history.json"
-
 
 class MLDetector:
 
-    # ── FIX 1 ────────────────────────────
-    # __init__ moved to top of class.
     def __init__(self):
 
-        # ── FIX 2 ────────────────────────
-        # contamination=0.01 — expects only
-        # 1% of training data to be outliers.
-        # Previous 0.05 caused idle env to
-        # score in HIGH range constantly.
         self.model = IsolationForest(
             n_estimators=100,
             contamination=0.01,
             random_state=42,
         )
 
-        self.model_path   = MODEL_PATH
+        self.model_path = MODEL_PATH
         self.history_path = HISTORY_PATH
-        self.is_trained   = False
+        self.training_state_path = TRAINING_STATE_PATH
+        self.is_trained = False
+        self.is_initial_training_complete = False
+        self.critical_threshold = None
+        self.high_threshold     = None
+        self.medium_threshold   = None
 
-    # ═════════════════════════════════════
+    # =====================================
     # TRAINING
-    # ═════════════════════════════════════
+    # =====================================
 
     def train(self) -> None:
         """
@@ -104,24 +71,59 @@ class MLDetector:
         scheduled retraining.
         """
 
+        sample_count = len(
+            feature_extractor.feature_history
+        )
+
+        if sample_count < MIN_SAMPLES:
+            logger.warning(
+                "Only %d samples collected - minimum is 60. "
+                "Skipping training. History saved for next run.",
+                sample_count
+            )
+            self.save_history()
+            return
+
+        if sample_count < INITIAL_MIN_SAMPLES:
+            logger.warning(
+                "Partial model - only %d of %d samples collected. "
+                "Model will work but is not fully calibrated. "
+                "Leave ATLAS running to collect a full 4hr baseline - 1440 samples.",
+                sample_count,
+                INITIAL_MIN_SAMPLES
+            )
+            os.makedirs("assets", exist_ok=True)
+            open(PARTIAL_MODEL_FLAG, "w").close()
+            self.is_initial_training_complete = False
+            self._save_training_state()
+
+        else:
+            if os.path.exists(PARTIAL_MODEL_FLAG):
+                os.remove(PARTIAL_MODEL_FLAG)
+
+            self.is_initial_training_complete = True
+            self._save_training_state()
+
         training_data = list(
             feature_extractor.feature_history
         )
 
-        # ── FIX 3 ────────────────────────
-        # Raised from 10 → MIN_SAMPLES=60.
-        if len(training_data) < MIN_SAMPLES:
-            logger.warning(
-                "Not enough training data: "
-                "%s/%s samples — keep "
-                "collecting.",
-                len(training_data),
-                MIN_SAMPLES,
-            )
-            return
-
         X = np.array(training_data)
         self.model.fit(X)
+        scores = self.model.score_samples(X)
+
+        self.critical_threshold = float(np.percentile(scores, 1))
+        self.high_threshold     = float(np.percentile(scores, 5))
+        self.medium_threshold   = float(np.percentile(scores, 10))
+
+        logger.info(
+            "Dynamic thresholds calibrated for this machine - "
+            "CRITICAL: %.4f | HIGH: %.4f | MEDIUM: %.4f",
+            self.critical_threshold,
+            self.high_threshold,
+            self.medium_threshold,
+        )
+
         self.is_trained = True
 
         logger.info(
@@ -129,44 +131,30 @@ class MLDetector:
             len(training_data)
         )
 
+        self._save_training_state()
         self.save_model()
 
-        # Always save history after a
-        # successful train so vectors
-        # survive the next restart.
         self.save_history()
 
-    # ═════════════════════════════════════
+    # =====================================
     # SCHEDULED RETRAINING
-    # ═════════════════════════════════════
+    # =====================================
 
     def schedule_retraining(self) -> None:
         """
         Wire weekly + bi-monthly retraining
         and hourly history saves into the
         schedule library.
-
-        Call once on startup AFTER
-        load_model() and load_history().
-
-        Requires the scheduler thread in
-        main.py to be running.
         """
 
-        # Every Sunday at 02:00
         schedule.every().sunday.at("02:00").do(
             self._silent_retrain
         )
 
-        # Checked monthly — only runs on
-        # even months (Feb/Apr/Jun/Aug/Oct/Dec)
-        schedule.every().month.at("03:00").do(
+        schedule.every().day.at("03:00").do(
             self._bimonthly_reset
         )
 
-        # Flush history to disk every hour
-        # so a crash doesn't lose the day's
-        # collected vectors.
         schedule.every().hour.do(
             self.save_history
         )
@@ -180,21 +168,20 @@ class MLDetector:
 
     def _silent_retrain(self) -> None:
         """
-        Weekly silent retrain — no user
-        interaction needed. Uses whatever
-        is in feature_history at the time.
+        Weekly silent retrain using the
+        long-term feature history.
         """
 
         available = len(
             feature_extractor.feature_history
         )
 
-        if available < WEEKLY_MIN_SAMPLES:
+        if available < INITIAL_MIN_SAMPLES:
             logger.warning(
-                "Weekly retrain skipped — "
+                "Weekly retrain skipped - "
                 "only %s/%s samples available.",
                 available,
-                WEEKLY_MIN_SAMPLES,
+                INITIAL_MIN_SAMPLES,
             )
             return
 
@@ -208,8 +195,6 @@ class MLDetector:
 
         logger.info("Weekly retrain complete")
 
-        # LOW severity — shows in log tab
-        # but does not raise an alert.
         event_bus.publish({
             "type":      "ML_RETRAINED",
             "reason":    "Weekly scheduled retrain",
@@ -223,31 +208,40 @@ class MLDetector:
         Bi-monthly full reset.
         Runs on the 1st of Feb, Apr, Jun,
         Aug, Oct, Dec at 03:00.
-
-        Clears the model and all collected
-        history so the system learns a
-        completely fresh baseline —
-        captures major life/usage changes
-        (new semester, new job, etc).
         """
 
-        # schedule fires every month —
-        # only execute on even months.
-        if datetime.now().month % 2 != 0:
+        now = datetime.now()
+
+        if now.day != 1:
+            return
+
+        if now.month % 2 != 0:
             return
 
         logger.info(
-            "Bi-monthly reset starting — "
+            "Bi-monthly reset starting - "
             "clearing model and history."
         )
 
         self.is_trained = False
+        self.is_initial_training_complete = False
+        self.critical_threshold = None
+        self.high_threshold = None
+        self.medium_threshold = None
         feature_extractor.feature_history.clear()
+        self._save_training_state()
 
-        # Remove saved history file so
-        # stale vectors are not reloaded
-        # on next startup.
+        event_bus.publish({
+            "type":      "ML_RETRAINING",
+            "reason":    "Bi-monthly reset",
+            "severity":  "LOW",
+            "timestamp": time.time(),
+        })
+
         try:
+            if os.path.exists(PARTIAL_MODEL_FLAG):
+                os.remove(PARTIAL_MODEL_FLAG)
+
             if os.path.exists(self.history_path):
                 os.remove(self.history_path)
                 logger.info(
@@ -261,27 +255,23 @@ class MLDetector:
                 error,
             )
 
-        # Dashboard banner — tells user ML
-        # protection is briefly in rule-based
-        # only mode while collecting fresh
-        # baseline.
         event_bus.publish({
             "type":      "ML_RETRAINING",
-            "reason":    "Bi-monthly reset — collecting fresh baseline",
+            "reason":    "Bi-monthly reset - collecting fresh baseline",
             "severity":  "LOW",
             "timestamp": time.time(),
         })
 
         logger.info(
-            "Bi-monthly reset complete — "
+            "Bi-monthly reset complete - "
             "fresh baseline collection has "
             "started. Weekly retrain will "
             "fire once enough data exists."
         )
 
-    # ═════════════════════════════════════
+    # =====================================
     # HISTORY PERSISTENCE
-    # ═════════════════════════════════════
+    # =====================================
 
     def save_history(self) -> None:
         """
@@ -292,6 +282,8 @@ class MLDetector:
         """
 
         try:
+            os.makedirs("assets", exist_ok=True)
+
             with open(self.history_path, "w") as f:
                 json.dump(
                     list(
@@ -302,7 +294,7 @@ class MLDetector:
 
             logger.info(
                 "Feature History Saved: "
-                "%s vectors → %s",
+                "%s vectors -> %s",
                 len(feature_extractor.feature_history),
                 self.history_path,
             )
@@ -337,11 +329,13 @@ class MLDetector:
                 self.history_path,
             )
 
-        except FileNotFoundError:
-            logger.info(
-                "No history file — "
-                "starting fresh collection."
+        except json.JSONDecodeError:
+            logger.warning(
+                "feature_history.json is corrupted - starting fresh."
             )
+
+        except FileNotFoundError:
+            logger.info("No history file - starting fresh.")
 
         except Exception as error:
             logger.warning(
@@ -349,9 +343,9 @@ class MLDetector:
                 error,
             )
 
-    # ═════════════════════════════════════
+    # =====================================
     # SCORING & DETECTION
-    # ═════════════════════════════════════
+    # =====================================
 
     def score(
         self,
@@ -360,8 +354,6 @@ class MLDetector:
         """
         Generate anomaly score.
         Lower = more anomalous.
-        Expected idle range after fixes:
-        approximately -0.10 to -0.25.
         """
 
         if not self.is_trained:
@@ -394,23 +386,25 @@ class MLDetector:
         X = np.array([feature_vector])
         return self.model.predict(X)[0]
 
-    # ── FIX 4 + FIX 5 ───────────────────
-    # Indentation fixed. Thresholds
-    # recalibrated — idle baseline sits
-    # around -0.10 to -0.25 after fixes,
-    # so real attacks have room to spike.
     def get_severity_from_score(
         self,
         score: float
     ) -> str:
 
-        if score < -0.70:
+        if None in (self.critical_threshold, self.high_threshold, self.medium_threshold):
+            logger.warning(
+                "Thresholds not set - skipping ML score. "
+                "Run --train to calibrate."
+            )
+            return "LOW"
+
+        if score < self.critical_threshold:
             return "CRITICAL"
 
-        if score < -0.60:
+        if score < self.high_threshold:
             return "HIGH"
 
-        if score < -0.50:
+        if score < self.medium_threshold:
             return "MEDIUM"
 
         return "LOW"
@@ -425,7 +419,7 @@ class MLDetector:
 
         if not self.is_trained:
             logger.warning(
-                "ML detection inactive — "
+                "ML detection inactive - "
                 "run with --train first."
             )
             return
@@ -444,9 +438,6 @@ class MLDetector:
         severity   = self.get_severity_from_score(score)
         prediction = self.predict(feature_vector)
 
-        # ── FIX 6 ────────────────────────
-        # Log every cycle so idle baseline
-        # drift is visible in real time.
         logger.info(
             "ML Prediction: %s | "
             "Score: %.4f | "
@@ -467,15 +458,6 @@ class MLDetector:
                 "timestamp":      time.time(),
             })
 
-            # ── TODO D8 ──────────────────
-            # if severity in ("HIGH", "CRITICAL"):
-            #     telegram_bot.send_alert(
-            #         f"🚨 ML Anomaly\n"
-            #         f"Score: {score:.4f}\n"
-            #         f"Severity: {severity}"
-            #     )
-            # ─────────────────────────────
-
     def start_monitoring(self) -> None:
         """
         Continuous ML monitoring loop.
@@ -486,7 +468,66 @@ class MLDetector:
 
         while True:
             try:
-                self.analyze_latest_features()
+                if not self.is_trained:
+                    logger.warning(
+                        "ML detection inactive - "
+                        "run with --train first."
+                    )
+                    time.sleep(10)
+                    continue
+
+                if not feature_extractor.feature_history:
+                    logger.warning(
+                        "No feature history available"
+                    )
+                    time.sleep(10)
+                    continue
+
+                feature_vector = (
+                    feature_extractor.feature_history[-1]
+                )
+
+                score = self.score(feature_vector)
+
+                if None in (self.critical_threshold, self.high_threshold, self.medium_threshold):
+                    logger.warning(
+                        "Thresholds not set - skipping ML score. "
+                        "Run --train to calibrate."
+                    )
+                    time.sleep(10)
+                    continue
+
+                if score < self.critical_threshold:
+                    severity = "CRITICAL"
+                elif score < self.high_threshold:
+                    severity = "HIGH"
+                elif score < self.medium_threshold:
+                    severity = "MEDIUM"
+                else:
+                    severity = "LOW"
+
+                prediction = self.predict(feature_vector)
+
+                logger.info(
+                    "ML Prediction: %s | "
+                    "Score: %.4f | "
+                    "Severity: %s",
+                    "ANOMALY" if prediction == -1 else "NORMAL",
+                    score,
+                    severity,
+                )
+
+                if prediction == -1:
+
+                    event_bus.publish({
+                        "type":           "ML_ANOMALY",
+                        "score":          score,
+                        "severity":       severity,
+                        "feature_vector": feature_vector,
+                        "prediction":     prediction,
+                        "timestamp":      time.time(),
+                    })
+
                 time.sleep(10)
 
             except Exception as error:
@@ -495,11 +536,13 @@ class MLDetector:
                     error
                 )
 
-    # ═════════════════════════════════════
+    # =====================================
     # MODEL PERSISTENCE
-    # ═════════════════════════════════════
+    # =====================================
 
     def save_model(self) -> None:
+
+        os.makedirs("assets", exist_ok=True)
 
         joblib.dump(self.model, self.model_path)
 
@@ -508,16 +551,73 @@ class MLDetector:
             self.model_path
         )
 
+    def _save_training_state(self) -> None:
+        import json
+        os.makedirs("assets", exist_ok=True)
+        state = {
+            "is_initial_training_complete": self.is_initial_training_complete,
+            "critical_threshold": self.critical_threshold,
+            "high_threshold":     self.high_threshold,
+            "medium_threshold":   self.medium_threshold,
+        }
+        with open("assets/training_state.json", "w") as f:
+            json.dump(state, f)
+        logger.info("Training state saved with calibrated thresholds.")
+
+    def _load_training_state(
+        self,
+        default: bool = False
+    ) -> None:
+
+        try:
+            with open(self.training_state_path) as f:
+                state = json.load(f)
+
+            self.is_initial_training_complete = bool(
+                state.get(
+                    "is_initial_training_complete",
+                    default
+                )
+            )
+            self.critical_threshold = state.get("critical_threshold")
+            self.high_threshold     = state.get("high_threshold")
+            self.medium_threshold   = state.get("medium_threshold")
+
+            logger.info(
+                "Training State Loaded: initial_complete=%s",
+                self.is_initial_training_complete
+            )
+
+        except FileNotFoundError:
+            self.is_initial_training_complete = default
+            logger.info(
+                "No training state file; "
+                "initial_complete inferred as %s",
+                self.is_initial_training_complete
+            )
+            self._save_training_state()
+
+        except Exception as error:
+            self.is_initial_training_complete = default
+            logger.warning(
+                "Training State Load Failed: %s",
+                error
+            )
+            self._save_training_state()
+
     def load_model(self) -> None:
+
+        model_loaded = False
 
         try:
             self.model = joblib.load(self.model_path)
             self.is_trained = True
+            model_loaded = True
             logger.info("ML Model Loaded")
 
         except FileNotFoundError:
             logger.info(
-                "No model file — "
+                "No model file - "
                 "run with --train to build baseline."
             )
 
@@ -526,6 +626,37 @@ class MLDetector:
                 "Model Load Failed: %s",
                 error
             )
+
+        self._load_training_state(
+            default=model_loaded
+        )
+
+        if None in (self.critical_threshold, self.high_threshold, self.medium_threshold):
+            logger.warning(
+                "Thresholds not calibrated - ML scoring disabled. "
+                "Run py -3.10 main.py --train to calibrate for this machine."
+            )
+            self.is_trained = False
+        else:
+            logger.info(
+                "Thresholds restored - CRITICAL: %.4f | HIGH: %.4f | MEDIUM: %.4f",
+                self.critical_threshold,
+                self.high_threshold,
+                self.medium_threshold,
+            )
+
+        if os.path.exists(PARTIAL_MODEL_FLAG):
+            logger.warning(
+                "Loaded a partial model - still collecting full 4hr baseline - 1440 samples. "
+                "Detection is active but accuracy improves as more data is collected."
+            )
+
+        event_bus.publish({
+            "type":      "ML_STATUS",
+            "trained":   self.is_initial_training_complete,
+            "partial":   os.path.exists(PARTIAL_MODEL_FLAG),
+            "timestamp": time.time(),
+        })
 
 
 ml_detector = MLDetector()
