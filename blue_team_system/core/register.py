@@ -109,3 +109,51 @@ def seed_demo_whitelist() -> None:
     add_to_whitelist("whitelist_ips", "127.0.0.1")
     add_to_whitelist("whitelist_ips", "192.168.1.1")
     print("[REGISTER] Demo whitelist seeded.")
+    
+def sync_user_to_supabase() -> bool:
+    """
+    Syncs the locally registered user to Supabase.
+    Call this after register_user() succeeds.
+    """
+    user = load_user()
+    if not user:
+        print("[SUPABASE] No local user to sync.")
+        return False
+    try:
+        from core.supabase_client import get_client, load_env
+        load_env()
+        sb = get_client()
+        # Store everything except the password hash for safety
+        data = {
+            "name": user["name"],
+            "email": user["email"],
+            "phone_tail": user["phone_tail"],
+            "telegram_id": user.get("telegram_id", ""),
+            "fingerprint_hash": user["fingerprint_hash"],
+            "registered_at": user["registered_at"],
+            "whitelist_processes": user.get("whitelist_processes", []),
+            "whitelist_ips": user.get("whitelist_ips", []),
+        }
+        sb.table("users").upsert(data).execute()
+        print(f"[SUPABASE] User '{user['name']}' synced.")
+        return True
+    except Exception as e:
+        print(f"[SUPABASE] Sync failed (running offline): {e}")
+        return False
+
+def fetch_user_from_supabase(email: str) -> dict | None:
+    """
+    Fetches user record from Supabase by email.
+    Falls back to local file if offline.
+    """
+    try:
+        from core.supabase_client import get_client, load_env
+        load_env()
+        sb = get_client()
+        result = sb.table("users").select("*").eq("email", email).execute()
+        if result.data:
+            return result.data[0]
+        return None
+    except Exception as e:
+        print(f"[SUPABASE] Fetch failed (running offline): {e}")
+        return load_user()

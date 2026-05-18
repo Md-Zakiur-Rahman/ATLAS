@@ -1,0 +1,22 @@
+{
+  "name": "Anvi",
+  "email": "24070721006@sithyd.siu.edu.in",
+  "password_hash": "$2b$12$ZUDMGBUTINB4Zv1s7YTqtOE3XKy3xx6BvYKd41K7.zDGW6F.NX4t2",
+  "phone_tail": "07067",
+  "telegram_id": "",
+  "fingerprint_hash": "9b4298ba2f09ba7f3b71c2a64d79db170378697cc5012db09c74340423f4e620",
+  "registered_at": 1779096353.1411011,
+  "whitelist_processes": [
+    "chrome.exe",
+    "code.exe",
+    "python.exe",
+    "explorer.exe",
+    "svchost.exe",
+    "notepad.exe"
+  ],
+  "whitelist_ips": [
+    "127.0.0.1",
+    "192.168.1.1"
+  ],
+  "whitelist_paths": []
+}

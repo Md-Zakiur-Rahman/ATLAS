@@ -9,6 +9,10 @@ def teardown_function():
     if os.path.exists(REG_FILE):
         os.remove(REG_FILE)
 
+def setup_function():
+    if os.path.exists("registered_user.json"):
+        os.remove("registered_user.json")
+
 def test_register_user():
     assert register_user("Alice", "alice@test.com", "pass123", "0501234567") is True
     assert is_registered() is True

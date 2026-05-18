@@ -103,3 +103,36 @@ def verify_auth(password: str, filepath: str = "auth.dat",
 
 def reset_attempts(session_id: str = "default") -> None:
     FAILED_ATTEMPTS[session_id] = 0
+    
+def verify_auth_supabase(email: str, password: str,
+                          dev_mode: bool = False,
+                          session_id: str = "default") -> tuple[bool, dict | None]:
+    """
+    Verifies login against Supabase user record.
+    Falls back to local auth.dat if Supabase is unreachable.
+    """
+    try:
+        from core.supabase_client import get_client, load_env
+        load_env()
+        sb = get_client()
+
+        # Use Supabase Auth for email/password verification
+        response = sb.auth.sign_in_with_password({
+            "email": email,
+            "password": password
+        })
+
+        if response.user:
+            FAILED_ATTEMPTS[session_id] = 0
+            _publish_auth_event("AUTH_SUCCESS", "LOW",
+                                f"Supabase login success for {email}")
+            return True, None
+        else:
+            FAILED_ATTEMPTS[session_id] = FAILED_ATTEMPTS.get(session_id, 0) + 1
+            _publish_auth_event("AUTH_FAIL", "HIGH",
+                                f"Supabase login failed for {email}")
+            return False, None
+
+    except Exception as e:
+        print(f"[AUTH] Supabase auth failed, falling back to local: {e}")
+        return verify_auth(password, dev_mode=dev_mode, session_id=session_id)
