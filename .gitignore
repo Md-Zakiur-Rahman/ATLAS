@@ -1,4 +1,5 @@
 .env
+config/secrets.py
 
 __pycache__/
 

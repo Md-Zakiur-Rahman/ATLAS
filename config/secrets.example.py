@@ -1,6 +1,6 @@
 import os
 
-SUPABASE_URL = os.getenv("SUPABASE_URL", "")
+SUPABASE_URL = os.getenv("SUPABASE_URL", "https://your-project-ref.supabase.co")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY", SUPABASE_SERVICE_ROLE_KEY)
 
