@@ -21,29 +21,10 @@ for _ in range(15):
 print(
     "Training model..."
 )
+ml_detector.load_model()  # load your existing trained model
 
-ml_detector.train()
+test_vector = feature_extractor.build_feature_vector()
 
-vector = (
-    feature_extractor
-    .build_feature_vector()
-)
+score = ml_detector.score(test_vector)
 
-score = ml_detector.score(
-    vector
-)
-
-severity = (
-    ml_detector
-    .get_severity_from_score(
-        score
-    )
-)
-
-print(
-    f"Score: {score}"
-)
-
-print(
-    f"Severity: {severity}"
-)
+print(f"Score: {score}")
