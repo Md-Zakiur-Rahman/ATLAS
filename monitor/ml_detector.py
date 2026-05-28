@@ -8,7 +8,6 @@ Isolation Forest.
 import json
 import os
 import time
-import logging
 from datetime import datetime
 from typing import List
 
@@ -17,6 +16,9 @@ import numpy as np
 import schedule
 from sklearn.ensemble import IsolationForest
 
+from config.logging_config import get_logger
+from core.runtime_state import runtime_state
+from core.training_state import load_training_state
 from monitor.event_bus import event_bus
 from monitor.feature_extractor import feature_extractor
 
@@ -28,16 +30,7 @@ MODEL_PATH = "assets/model.pkl"
 HISTORY_PATH = "assets/feature_history.json"
 TRAINING_STATE_PATH = "assets/training_state.json"
 
-logging.basicConfig(
-    level=logging.INFO,
-    format=(
-        "%(asctime)s | "
-        "%(levelname)s | "
-        "%(message)s"
-    )
-)
-
-logger = logging.getLogger("ATLAS-MLDetector")
+logger = get_logger("ml")
 
 
 class MLDetector:
@@ -62,6 +55,21 @@ class MLDetector:
     # =====================================
     # TRAINING
     # =====================================
+
+    def _is_clean_baseline_vector(self, vector: List[float]) -> bool:
+        """
+        Keep baseline realistic for desktop usage by excluding
+        network-only spikes with no corroborating host behavior.
+        Vector schema:
+        [files_modified, files_deleted, files_renamed, new_processes, cpu_percent, outbound_connections, failed_auth_attempts, hour, weekday]
+        """
+        if len(vector) < 7:
+            return False
+        files_modified, files_deleted, files_renamed, new_processes, _cpu, outbound_connections, failed_auth_attempts = vector[:7]
+        host_activity = files_modified + files_deleted + files_renamed + new_processes + failed_auth_attempts
+        if host_activity == 0 and outbound_connections >= 2:
+            return False
+        return True
 
     def train(self) -> None:
         """
@@ -104,9 +112,14 @@ class MLDetector:
             self.is_initial_training_complete = True
             self._save_training_state()
 
-        training_data = list(
-            feature_extractor.feature_history
-        )
+        raw_training_data = list(feature_extractor.feature_history)
+        training_data = [row for row in raw_training_data if self._is_clean_baseline_vector(row)]
+        if len(training_data) < MIN_SAMPLES:
+            logger.warning(
+                "Clean telemetry after filtering is too small (%d). Keeping raw baseline for this training run.",
+                len(training_data),
+            )
+            training_data = raw_training_data
 
         X = np.array(training_data)
         self.model.fit(X)
@@ -125,10 +138,19 @@ class MLDetector:
         )
 
         self.is_trained = True
+        runtime_state.set_nested(
+            "ml_status",
+            {
+                "trained": True,
+                "initial_training_complete": self.is_initial_training_complete,
+                "partial_model": sample_count < INITIAL_MIN_SAMPLES,
+            },
+        )
 
         logger.info(
-            "ML Model Trained On %s Samples",
-            len(training_data)
+            "ML Model Trained On %s Clean Samples (raw=%s)",
+            len(training_data),
+            len(raw_training_data),
         )
 
         self._save_training_state()
@@ -196,7 +218,7 @@ class MLDetector:
         logger.info("Weekly retrain complete")
 
         event_bus.publish({
-            "type":      "ML_RETRAINED",
+            "event_type":      "ML_RETRAINED",
             "reason":    "Weekly scheduled retrain",
             "samples":   available,
             "severity":  "LOW",
@@ -232,7 +254,7 @@ class MLDetector:
         self._save_training_state()
 
         event_bus.publish({
-            "type":      "ML_RETRAINING",
+            "event_type":      "ML_RETRAINING",
             "reason":    "Bi-monthly reset",
             "severity":  "LOW",
             "timestamp": time.time(),
@@ -256,7 +278,7 @@ class MLDetector:
             )
 
         event_bus.publish({
-            "type":      "ML_RETRAINING",
+            "event_type":      "ML_RETRAINING",
             "reason":    "Bi-monthly reset - collecting fresh baseline",
             "severity":  "LOW",
             "timestamp": time.time(),
@@ -343,6 +365,14 @@ class MLDetector:
                 error,
             )
 
+    def _refresh_thresholds_from_training_state(self) -> None:
+        state = load_training_state()
+        if not state:
+            return
+        self.critical_threshold = state.get("critical_threshold", self.critical_threshold)
+        self.high_threshold = state.get("high_threshold", self.high_threshold)
+        self.medium_threshold = state.get("medium_threshold", self.medium_threshold)
+
     # =====================================
     # SCORING & DETECTION
     # =====================================
@@ -367,6 +397,7 @@ class MLDetector:
             "Anomaly Score: %.4f",
             score
         )
+        runtime_state.update(latest_anomaly_score=float(score))
 
         return score
 
@@ -391,6 +422,7 @@ class MLDetector:
         score: float
     ) -> str:
 
+        self._refresh_thresholds_from_training_state()
         if None in (self.critical_threshold, self.high_threshold, self.medium_threshold):
             logger.warning(
                 "Thresholds not set - skipping ML score. "
@@ -398,15 +430,13 @@ class MLDetector:
             )
             return "LOW"
 
-        if score < self.critical_threshold:
+        # Calibrated mapping: normal stays low/info, borderline medium, confirmed high, chained dangerous critical.
+        if score < (self.critical_threshold - 0.05):
             return "CRITICAL"
-
         if score < self.high_threshold:
             return "HIGH"
-
         if score < self.medium_threshold:
             return "MEDIUM"
-
         return "LOW"
 
     def analyze_latest_features(
@@ -448,15 +478,19 @@ class MLDetector:
         )
 
         if prediction == -1:
-
+            runtime_state.set_nested("ml_status", {"last_severity": severity})
             event_bus.publish({
-                "type":           "ML_ANOMALY",
-                "score":          score,
-                "severity":       severity,
+                "event_type": "ML_ANOMALY",
+                "score": score,
+                "severity": severity,
+                "confirmed": severity in {"HIGH", "CRITICAL"},
+                "chained": severity == "CRITICAL",
                 "feature_vector": feature_vector,
-                "prediction":     prediction,
-                "timestamp":      time.time(),
+                "prediction": prediction,
+                "timestamp": time.time(),
             })
+        else:
+            runtime_state.set_nested("ml_status", {"last_severity": "LOW"})
 
     def start_monitoring(self) -> None:
         """
@@ -489,6 +523,7 @@ class MLDetector:
 
                 score = self.score(feature_vector)
 
+                self._refresh_thresholds_from_training_state()
                 if None in (self.critical_threshold, self.high_threshold, self.medium_threshold):
                     logger.warning(
                         "Thresholds not set - skipping ML score. "
@@ -497,16 +532,14 @@ class MLDetector:
                     time.sleep(10)
                     continue
 
-                if score < self.critical_threshold:
-                    severity = "CRITICAL"
-                elif score < self.high_threshold:
-                    severity = "HIGH"
-                elif score < self.medium_threshold:
-                    severity = "MEDIUM"
-                else:
-                    severity = "LOW"
-
+                severity = self.get_severity_from_score(score)
                 prediction = self.predict(feature_vector)
+
+                if prediction == 1 and severity in {"HIGH", "CRITICAL"}:
+                    severity = "LOW"
+                runtime_state.update(latest_anomaly_score=float(score))
+                normalized_score = 1 - ((score - (-1.0)) / (1.0 - (-1.0)))
+                runtime_state.update(behavioral_deviation=normalized_score)
 
                 logger.info(
                     "ML Prediction: %s | "
@@ -517,15 +550,21 @@ class MLDetector:
                     severity,
                 )
 
+                runtime_state.set_nested(
+                    "ml_status",
+                    {"last_severity": severity}
+                )
+                
                 if prediction == -1:
-
                     event_bus.publish({
-                        "type":           "ML_ANOMALY",
-                        "score":          score,
-                        "severity":       severity,
+                        "event_type": "ML_ANOMALY",
+                        "score": score,
+                        "severity": severity,
+                        "confirmed": severity in {"HIGH", "CRITICAL"},
+                        "chained": severity == "CRITICAL",
                         "feature_vector": feature_vector,
-                        "prediction":     prediction,
-                        "timestamp":      time.time(),
+                        "prediction": prediction,
+                        "timestamp": time.time(),
                     })
 
                 time.sleep(10)
@@ -560,7 +599,7 @@ class MLDetector:
             "high_threshold":     self.high_threshold,
             "medium_threshold":   self.medium_threshold,
         }
-        with open("assets/training_state.json", "w") as f:
+        with open(self.training_state_path, "w") as f:
             json.dump(state, f)
         logger.info("Training state saved with calibrated thresholds.")
 
@@ -631,18 +670,27 @@ class MLDetector:
             default=model_loaded
         )
 
+        self._refresh_thresholds_from_training_state()
         if None in (self.critical_threshold, self.high_threshold, self.medium_threshold):
             logger.warning(
                 "Thresholds not calibrated - ML scoring disabled. "
                 "Run py -3.10 main.py --train to calibrate for this machine."
             )
             self.is_trained = False
+            runtime_state.set_nested("ml_status", {"trained": False})
         else:
             logger.info(
                 "Thresholds restored - CRITICAL: %.4f | HIGH: %.4f | MEDIUM: %.4f",
                 self.critical_threshold,
                 self.high_threshold,
                 self.medium_threshold,
+            )
+            runtime_state.set_nested(
+                "ml_status",
+                {
+                    "trained": True,
+                    "initial_training_complete": self.is_initial_training_complete,
+                },
             )
 
         if os.path.exists(PARTIAL_MODEL_FLAG):
@@ -652,7 +700,7 @@ class MLDetector:
             )
 
         event_bus.publish({
-            "type":      "ML_STATUS",
+            "event_type":      "ML_STATUS",
             "trained":   self.is_initial_training_complete,
             "partial":   os.path.exists(PARTIAL_MODEL_FLAG),
             "timestamp": time.time(),

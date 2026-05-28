@@ -1,112 +1,136 @@
 import customtkinter as ctk
-from customtkinter import CTkLabel, CTkFrame, CTkButton, CTkScrollableFrame
 import threading
+
 from database.db_manager import get_network_connections
+from dashboard.ui_theme import BrutalistTheme
 
 
 class NetworkTab(ctk.CTkFrame):
     def __init__(self, parent, on_critical_connection=None):
-        super().__init__(parent)
+        super().__init__(parent, fg_color=BrutalistTheme.PANEL)
         self.on_critical_connection = on_critical_connection
         self.seen_events = set()
         self._refresh_running = False
         self._update_scheduled = False
+        self.connection_rows = []
+        self.connections = []
+
         self.pack(fill="both", expand=True)
         self.grid_rowconfigure(1, weight=1)
         self.grid_columnconfigure(0, weight=1)
 
-        header = CTkFrame(self, fg_color="#262626", corner_radius=12)
-        header.grid(row=0, column=0, sticky="ew", padx=14, pady=(14, 8))
+        header = BrutalistTheme.card(self, fg_color=BrutalistTheme.PANEL_ALT)
+        header.grid(row=0, column=0, sticky="ew", padx=8, pady=(8, 4))
         header.grid_columnconfigure(0, weight=1)
 
-        left = CTkFrame(header, fg_color="transparent")
-        left.grid(row=0, column=0, sticky="w", padx=14, pady=10)
-        CTkLabel(left, text="🌐 Live Network Connections", font=("Arial", 16, "bold"), text_color="#00ff66").pack(anchor="w")
-        CTkLabel(left, text="Monitoring active connections and suspicious endpoints", font=("Arial", 11), text_color="#a9a9a9").pack(anchor="w", pady=(2, 0))
+        left = ctk.CTkFrame(header, fg_color="transparent")
+        left.grid(row=0, column=0, sticky="w", padx=10, pady=6)
+        ctk.CTkLabel(left, text="NETWORK WATCH", font=BrutalistTheme.FONT_TITLE, text_color=BrutalistTheme.INK).pack(anchor="w")
+        ctk.CTkLabel(left, text="compact live outbound telemetry", font=BrutalistTheme.FONT_SMALL, text_color=BrutalistTheme.CYAN).pack(anchor="w")
 
-        right = CTkFrame(header, fg_color="transparent")
-        right.grid(row=0, column=1, sticky="e", padx=14, pady=10)
-        CTkButton(right, text="Refresh", command=self.refresh_connections, fg_color="#00aa00", hover_color="#00cc00", width=110, height=34).pack(anchor="e")
+        ctk.CTkButton(header, text="Refresh", command=self.refresh_connections, width=110, height=30, **BrutalistTheme.button_style("olive")).grid(row=0, column=1, padx=10, pady=8)
 
-        self.content_frame = CTkScrollableFrame(self, fg_color="#222222", corner_radius=12)
-        self.content_frame.grid(row=1, column=0, sticky="nsew", padx=14, pady=(0, 14))
-        self.connections = []
+        self.table = ctk.CTkScrollableFrame(self, fg_color=BrutalistTheme.PANEL, corner_radius=0, border_width=2, border_color=BrutalistTheme.INK)
+        self.table.grid(row=1, column=0, sticky="nsew", padx=8, pady=(4, 8))
+
         self.refresh_connections()
 
     def _event_key(self, conn):
-        ip = conn.get("remote_ip", conn.get("remoteip", "N/A"))
-        port = conn.get("remote_port", conn.get("remoteport", "N/A"))
+        ip = conn.get("remote_ip", "N/A")
+        port = conn.get("remote_port", "N/A")
         process = conn.get("process", "N/A")
-        city = conn.get("city", "N/A")
-        country = conn.get("country", "N/A")
-        return f"{ip}|{port}|{process}|{city}|{country}"
+        return f"{ip}|{port}|{process}"
 
     def refresh_connections(self):
-        if self._refresh_running:
+        if not self.winfo_exists() or self._refresh_running:
             return
         self._refresh_running = True
 
         def fetch_data():
             try:
-                self.connections = get_network_connections(limit=20) or []
-                self.after(0, self.draw_table)
-            except Exception as e:
-                print(f"❌ Error: {e}")
-                self.after(3000, self.refresh_connections)
+                self.connections = get_network_connections(limit=60) or []
+                if self.winfo_exists():
+                    self.after(0, self.draw_table)
             finally:
                 self._refresh_running = False
 
         threading.Thread(target=fetch_data, daemon=True).start()
 
     def draw_table(self):
+        if not self.winfo_exists() or self._update_scheduled:
+            return
+        self._update_scheduled = True
         try:
-            if self._update_scheduled:
-                return
-            self._update_scheduled = True
-
-            for widget in self.content_frame.winfo_children():
-                widget.destroy()
-
             if not self.connections:
-                CTkLabel(self.content_frame, text="No connections found", text_color="#888888", font=("Arial", 12)).pack(pady=25)
+                ctk.CTkLabel(self.table, text="NO CONNECTIONS", text_color=BrutalistTheme.TEXT_MUTED, font=BrutalistTheme.FONT_BODY).pack(pady=12)
                 return
 
-            for conn in self.connections:
-                ip = conn.get("remote_ip", conn.get("remoteip", "N/A"))
-                port = conn.get("remote_port", conn.get("remoteport", "N/A"))
-                process = conn.get("process", "N/A")
+            for idx, conn in enumerate(self.connections[:120]):
+                ip = conn.get("remote_ip", "N/A")
+                port = conn.get("remote_port", "N/A")
+                process = (conn.get("process_name", "N/A") or "N/A")[:20]
                 city = conn.get("city", "N/A")
                 country = conn.get("country", "N/A")
-                threat_flag = conn.get("threat_flag", conn.get("threatflag", False))
-                event_key = self._event_key(conn)
+                threat_flag = bool(conn.get("threat_flag", False))
+                severity = str(conn.get("severity", "LOW")).upper()
 
-                if threat_flag and event_key not in self.seen_events:
-                    self.seen_events.add(event_key)
-                    if self.on_critical_connection:
-                        self.on_critical_connection({
-                            "ip": ip,
-                            "city": city,
-                            "country": country,
-                            "port": port,
-                            "process": process,
-                            "threat_type": "NETWORK",
-                        })
+                # Create new row widgets if needed
+                if idx >= len(self.connection_rows):
+                    row_widgets = {}
+                    base_color = "#f7f1e4" if idx % 2 == 0 else "#efe8d8"
+                    row = ctk.CTkFrame(self.table, fg_color=base_color, corner_radius=0, border_width=0, height=40)
+                    row.pack_propagate(False)
+                    row_widgets["row"] = row
+                    row_widgets["base_color"] = base_color
 
-                row = CTkFrame(self.content_frame, fg_color="#2d2d2d", corner_radius=10)
-                row.pack(fill="x", padx=8, pady=6)
+                    strip = ctk.CTkFrame(row, width=6, corner_radius=0)
+                    strip.pack(side="left", fill="y")
+                    row_widgets["strip"] = strip
 
-                left = CTkFrame(row, fg_color="transparent")
-                left.pack(side="left", fill="x", expand=True, padx=12, pady=10)
-                CTkLabel(left, text=process, font=("Arial", 12, "bold"), text_color="#ffffff").pack(anchor="w")
-                CTkLabel(left, text=f"{ip}:{port}  •  {city}, {country}", font=("Arial", 10), text_color="#bdbdbd").pack(anchor="w", pady=(2, 0))
+                    label = ctk.CTkLabel(row, text="", font=BrutalistTheme.FONT_SMALL, text_color=BrutalistTheme.INK)
+                    label.pack(anchor="w", padx=8, pady=8)
+                    row_widgets["label"] = label
 
-                badge_color = "#ff3b30" if threat_flag else "#00c853"
-                badge_text = "THREAT" if threat_flag else "OK"
-                CTkLabel(row, text=badge_text, font=("Arial", 10, "bold"), text_color="#ffffff", fg_color=badge_color, corner_radius=8, padx=10, pady=4).pack(side="right", padx=12, pady=12)
+                    sep = ctk.CTkFrame(self.table, fg_color="#d8cfbc", corner_radius=0, height=1)
+                    row_widgets["sep"] = sep
+                    self.connection_rows.append(row_widgets)
 
-            self.after(3000, self.refresh_connections)
-        except Exception as e:
-            print(f"❌ Error drawing: {e}")
-            self.after(3000, self.refresh_connections)
+                # Configure existing widgets
+                widgets = self.connection_rows[idx]
+                sev = "NORMAL"
+                if severity == "CRITICAL":
+                    sev = "CRITICAL"
+                elif severity == "HIGH" or threat_flag:
+                    sev = "HIGH"
+                elif severity == "MEDIUM":
+                    sev = "MEDIUM"
+
+                sev_color_map = {
+                    "CRITICAL": BrutalistTheme.CRITICAL,
+                    "HIGH": BrutalistTheme.HIGH,
+                    "MEDIUM": BrutalistTheme.AMBER,
+                    "NORMAL": BrutalistTheme.TERM_GREEN,
+                }
+                sev_color = sev_color_map.get(sev, BrutalistTheme.TERM_GREEN)
+                widgets["strip"].configure(fg_color=sev_color)
+
+                ts = str(conn.get("timestamp", "N/A"))
+                if "T" in ts:
+                    ts = ts.split("T")[1][:8]
+                line = f"{sev:<9} {process:<20} {f'{ip}:{port}':<28} {f'{city}, {country}':<18} {ts:<8}"
+                widgets["label"].configure(text=line)
+
+                widgets["row"].pack(fill="x", padx=3, pady=0, ipady=1)
+                widgets["sep"].pack(fill="x", padx=3, pady=0)
+
+            # Hide unused row widgets
+            for i in range(len(self.connections), len(self.connection_rows)):
+                self.connection_rows[i]["row"].pack_forget()
+                self.connection_rows[i]["sep"].pack_forget()
+
+            if hasattr(self.table, "_parent_canvas"):
+                self.table._parent_canvas.yview_moveto(0.0)
         finally:
             self._update_scheduled = False
+            if self.winfo_exists():
+                self.after(3000, self.refresh_connections)

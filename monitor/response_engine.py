@@ -26,38 +26,54 @@ FIXES APPLIED (Day 6):
   5. timestamp added to all published events
      so feature_extractor window filter works.
 """
+from dotenv import load_dotenv
+load_dotenv()
 
-import time
 import logging
+import time
 import os
 import socket
 import uuid
+import json
+import threading
+from collections import defaultdict, deque
+from datetime import datetime
+from pathlib import Path
 
 import psutil
 
+from config.logging_config import get_logger
 from database.client import supabase
-from monitor.rename_log import rename_log
+from database.db_manager import log_event
+from core.crypto_service import activate_vault_lock
+from core.runtime_state import runtime_state
+from core.vault import (
+    VAULT_FORENSIC_LOGS,
+    backup_folder_snapshot,
+    ensure_vault_structure,
+    isolate_folder,
+    release_folder,
+)
+from auth.vault_auth import vault_auth_manager
 from monitor.event_bus import event_bus
+from monitor.rules import DEFAULT_MONITOR_PATH
 from notifications.email_sender import email_sender
 
-logging.basicConfig(
-    level=logging.INFO,
-    format=(
-        "%(asctime)s | "
-        "%(levelname)s | "
-        "%(message)s"
-    )
-)
+logger = get_logger("responses")
 
-logger = logging.getLogger(
-    "ATLAS-ResponseEngine"
-)
+# --- Persistent Containment Log ---
+containment_logger = get_logger("containment")
 
 
 class ResponseEngine:
 
     def __init__(self):
-
+        ensure_vault_structure()
+        self.containment_cooldown_seconds = 300
+        self._recent_file_events = deque(maxlen=500)
+        self._active_folder_containment: dict[str, float] = {}
+        self._trusted_processes = {"chrome.exe", "msedge.exe", "code.exe", "explorer.exe", "winword.exe", "onedrive.exe"}
+        self._benign_path_markers = ("\\cache\\", "\\temp\\", "\\tmp\\", "\\steam\\", "\\epic games\\", "\\nvidia\\")
         event_bus.subscribe(
             self.process_event
         )
@@ -66,9 +82,20 @@ class ResponseEngine:
         self,
         event
     ) -> None:
+        active_email = runtime_state.snapshot().get("current_email")
+        if runtime_state.snapshot().get("replay_active"):
+            return
 
-        event_type = event.get("type", "")
+        if active_email and "email" not in event:
+            event["email"] = active_email
+
+        event_type = event.get("event_type", "")
         severity   = event.get("severity", "")
+
+        # --- Authoritative Rule-Based Containment ---
+        if event_type == "HONEYPOT_DIRECTORY_ACCESS":
+            self.handle_honeypot_access(event)
+            return
 
         if event_type == "VAULT_LOCKED":
             logger.info("VAULT_LOCKED event observed; no further escalation needed.")
@@ -79,6 +106,19 @@ class ResponseEngine:
         # original.
         if event_type == "AUTH_BRUTE_FORCE":
             self.handle_auth_bruteforce(event)
+            return
+
+        # Handle ransomware-like activity
+        if event_type == "POSSIBLE_RANSOMWARE_ACTIVITY":
+            self.handle_ransomware_activity(event)
+            return
+
+        if event_type == "EXFILTRATION_PATTERN_DETECTED":
+            self.handle_exfiltration(event)
+            return
+
+        if event_type == "TOKEN_ABUSE_BURST":
+            self.handle_token_abuse(event)
             return
 
         # ML_ANOMALY now has its own block
@@ -104,7 +144,10 @@ class ResponseEngine:
             )
 
             if severity == "CRITICAL":
-                self.handle_ml_critical(event)
+                if event.get("confirmed") or event.get("chained"):
+                    self.handle_ml_critical(event)
+                else:
+                    self.handle_ml_high(event)
 
             elif severity == "HIGH":
                 self.handle_ml_high(event)
@@ -119,8 +162,30 @@ class ResponseEngine:
         # Network suspicious connection -
         # unchanged from original.
         if event_type == "NETWORK_CONNECTION":
-            if event.get("suspicious"):
-                self.handle_high_threat(event)
+            # Network events are informational unless explicit risk reasons exist.
+            if event.get("suspicious") and event.get("risk_reasons"):
+                self.handle_medium_threat(event)
+            return
+
+        if event_type == "TARGETED_CONTAINMENT":
+            logger.critical(
+                "Targeted containment active | folder=%s | process=%s",
+                event.get("attacked_folder"),
+                event.get("attacking_process"),
+            )
+            runtime_state.add_alert(
+                {
+                    "type": "TARGETED_CONTAINMENT",
+                    "severity": "CRITICAL",
+                    "timestamp": event.get("timestamp", time.time()),
+                    "details": event,
+                }
+            )
+            return
+
+        if event_type in {"FILE_MODIFIED", "FILE_RENAMED", "FILE_CREATED", "FILE_DELETED"}:
+            self._handle_file_telemetry(event)
+            return
 
         # Generic severity routing for all
         # other event types.
@@ -144,6 +209,223 @@ class ResponseEngine:
         except Exception as error:
             logger.warning("Screenshot failed: %s", error)
             return None
+
+    def _handle_file_telemetry(self, event: dict) -> None:
+        folder = str(event.get("folder") or Path(str(event.get("path", ""))).parent)
+        process = str(event.get("process_name") or "UNKNOWN")
+        normalized_process = process.lower()
+        now = time.time()
+
+        if any(marker in folder.lower() for marker in self._benign_path_markers):
+            return
+        if normalized_process in self._trusted_processes:
+            return
+
+        self._recent_file_events.append(
+            {
+                "ts": now,
+                "event_type": event.get("event_type"),
+                "path": event.get("path"),
+                "folder": folder,
+                "process": process,
+                "pid": event.get("pid"),
+                "entropy": float(event.get("entropy") or 0.0),
+            }
+        )
+        window = [row for row in self._recent_file_events if now - row["ts"] <= 20 and row["folder"] == folder]
+        if len(window) < 8:
+            return
+
+        same_process_counts = defaultdict(int)
+        per_file_writes = defaultdict(int)
+        entropy_spikes = 0
+        modifications = 0
+        for row in window:
+            same_process_counts[row["process"]] += 1
+            if row["type"] in {"FILE_MODIFIED", "FILE_RENAMED"}:
+                modifications += 1
+            per_file_writes[row["path"]] += 1
+            if row["entropy"] >= 7.3:
+                entropy_spikes += 1
+
+        repeated_writes = sum(1 for count in per_file_writes.values() if count >= 3)
+        max_process, max_count = max(same_process_counts.items(), key=lambda kv: kv[1])
+        same_process_mass_mod = max_count >= 6
+        rapid_modifications = modifications >= 8
+        short_window_correlation = len(window) >= 10
+
+        signals = {
+            "rapid_file_modifications": rapid_modifications,
+            "repeated_writes": repeated_writes >= 2,
+            "entropy_spikes": entropy_spikes >= 3,
+            "same_process_mass_modifications": same_process_mass_mod,
+            "short_time_window_correlation": short_window_correlation,
+        }
+        positive = sum(1 for v in signals.values() if v)
+        if positive < 3:
+            return
+
+        attacker_pid = None
+        for row in reversed(window):
+            if row["process"] == max_process and row.get("pid"):
+                attacker_pid = row["pid"]
+                break
+        self._contain_folder_attack(folder, max_process, attacker_pid, signals, len(window))
+
+    def _contain_folder_attack(self, folder: str, process_name: str, pid: int | None, signals: dict, event_count: int) -> None:
+        now = time.time()
+        until = self._active_folder_containment.get(folder, 0)
+        if until > now:
+            return
+        self._active_folder_containment[folder] = now + self.containment_cooldown_seconds
+
+        killed = False
+        if pid:
+            try:
+                psutil.Process(int(pid)).kill()
+                killed = True
+            except Exception as error:
+                logger.warning("Containment process termination failed for pid=%s: %s", pid, error)
+
+        snapshot_path = backup_folder_snapshot(folder)
+        isolation = isolate_folder(folder)
+        forensic = {
+            "timestamp": datetime.utcnow().isoformat(),
+            "attacked_folder": folder,
+            "attacking_process": process_name,
+            "attacker_pid": pid,
+            "process_terminated": killed,
+            "signals": signals,
+            "window_events": event_count,
+            "backup_snapshot": snapshot_path,
+            "isolation_marker": isolation.get("marker"),
+            "cooldown_seconds": self.containment_cooldown_seconds,
+        }
+        log_file = VAULT_FORENSIC_LOGS / f"containment_{int(now)}.json"
+        log_file.write_text(json.dumps(forensic, indent=2), encoding="utf-8")
+        log_event(
+            event_type="TARGETED_CONTAINMENT",
+            severity="CRITICAL",
+            details=forensic,
+            category="CONTAINMENT",
+        )
+
+        runtime_state.set_nested(
+            "containment_state",
+            {
+                "active": True,
+                "state": "CONTAINED",
+                "attacked_folder": folder,
+                "attacking_process": process_name,
+                "attacker_pid": pid,
+                "forensic_log": str(log_file),
+                "backup_snapshot": snapshot_path,
+                "recovery_options": "Restore from vault/backups or release containment after cooldown.",
+                "cooldown_ends_at": now + self.containment_cooldown_seconds,
+            },
+        )
+        event_bus.publish(
+            {
+                "event_type": "TARGETED_CONTAINMENT",
+                "severity": "CRITICAL",
+                "ransomware_detected": True,
+                "confirmed_critical": True,
+                "attacked_folder": folder,
+                "attacking_process": process_name,
+                "attacker_pid": pid,
+                "forensic_log": str(log_file),
+                "cooldown_ends_at": now + self.containment_cooldown_seconds,
+                "timestamp": now,
+            }
+        )
+        email_sender.send_critical_alert(
+            {
+                "event_type": "TARGETED_CONTAINMENT",
+                "ransomware_detected": True,
+                "pid": pid,
+                "process_name": process_name,
+                "attacked_folder": folder,
+            },
+            self._capture_screenshot(),
+        )
+        containment_logger.info(
+            "EVENT=TARGETED_CONTAINMENT | "
+            f"FOLDER={folder} | "
+            f"PROCESS={process_name} | "
+            f"PID={pid} | "
+            f"SIGNALS={signals}"
+        )
+        threading.Thread(target=self._recover_folder_after_cooldown, args=(folder,), daemon=True).start()
+
+    def _recover_folder_after_cooldown(self, folder: str) -> None:
+        until = self._active_folder_containment.get(folder, time.time())
+        sleep_for = max(0, until - time.time())
+        time.sleep(sleep_for)
+        release = release_folder(folder)
+        runtime_state.set_nested(
+            "containment_state",
+            {
+                "active": False,
+                "state": "RECOVERED",
+                "attacked_folder": folder,
+                "restored_items": release.get("restored_items", 0),
+                "recovery_options": "Folder writes restored. You can review forensic logs and backups.",
+            },
+        )
+        event_bus.publish(
+            {
+                "event_type": "CONTAINMENT_RECOVERED",
+                "severity": "LOW",
+                "attacked_folder": folder,
+                "timestamp": time.time(),
+            }
+        )
+
+    def handle_honeypot_access(self, event: dict):
+        """Immediate, critical response to any honeypot access."""
+        path = event.get("path", "N/A")
+        action = event.get("action", "access")
+        reason = f"Honeypot directory access detected ({action}): {path}"
+        logger.critical(reason)
+
+        # 1. Lock the vault immediately
+        activate_vault_lock(reason)
+
+        # 2. Log the critical event with details
+        details = {"reason": reason, "path": path, "action": action}
+        log_event(
+            event_type="VAULT_LOCKED_AUTOMATIC",
+            severity="CRITICAL",
+            details=details,
+            category="CONTAINMENT",
+        )
+
+        # 3. Publish VAULT_LOCKED event for UI and other subscribers
+        event_bus.publish({
+            "event_type": "VAULT_LOCKED",
+            "reason": "HONEYPOT_DIRECTORY_ACCESS",
+            "severity": "CRITICAL",
+            "timestamp": time.time(),
+        })
+
+        # 4. Send email notification
+        email_sender.send_critical_alert(event, self._capture_screenshot())
+
+        # 5. Persist lock state to user's vault profile
+        if event.get("email"):
+            vault_auth_manager.lock_vault(event["email"], reason="HONEYPOT_DIRECTORY_ACCESS", severity="CRITICAL")
+
+    def handle_ransomware_activity(self, event: dict):
+        """Response to mass file modification events."""
+        reason = "Possible ransomware activity detected (mass file modification)"
+        logger.critical(reason)
+        activate_vault_lock(reason)
+        details = {"reason": reason, "details": event.get("details")}
+        log_event(event_type="VAULT_LOCKED_AUTOMATIC", severity="CRITICAL", details=details, category="CONTAINMENT")
+        event_bus.publish({"event_type": "VAULT_LOCKED", "reason": "POSSIBLE_RANSOMWARE_ACTIVITY", "severity": "CRITICAL", "timestamp": time.time()})
+        email_sender.send_critical_alert(event, self._capture_screenshot())
+        if event.get("email"):
+            vault_auth_manager.lock_vault(event["email"], reason="POSSIBLE_RANSOMWARE_ACTIVITY", severity="CRITICAL")
 
     # =====================================
     # MEDIUM
@@ -203,7 +485,7 @@ class ResponseEngine:
         )
 
         event_bus.publish({
-            "type":      "ML_HIGH_ALERT",
+            "event_type":      "ML_HIGH_ALERT",
             "score":     event.get("score"),
             "severity":  "HIGH",
             "timestamp": time.time(),
@@ -219,16 +501,21 @@ class ResponseEngine:
         event
     ) -> None:
 
-        logger.critical(
-            "ML CRITICAL Anomaly - locking vault as precaution"
-        )
+        logger.critical("ML CRITICAL anomaly confirmed/chained - containment path")
 
-        event_bus.publish({
-            "type":      "VAULT_LOCKED",
-            "reason":    "ML anomaly score CRITICAL",
-            "severity":  "CRITICAL",
-            "timestamp": time.time(),
-        })
+        if event.get("confirmed") or event.get("chained") or int(event.get("repeat_count", 0)) >= 3:
+            event_bus.publish({
+                "event_type": "VAULT_LOCKED",
+                "reason": "ML anomaly score CRITICAL",
+                "severity": "CRITICAL",
+                "timestamp": time.time(),
+            })
+            activate_vault_lock("ML anomaly score CRITICAL")
+            containment_logger.info(
+                "EVENT=VAULT_LOCK | "
+                "REASON=ML_CRITICAL_ANOMALY | "
+                f"SCORE={event.get('score')}"
+            )
 
         screenshot_path = self._capture_screenshot()
         email_sender.send_critical_alert(event, screenshot_path)
@@ -260,40 +547,27 @@ class ResponseEngine:
                     error
                 )
 
-        # Rollback log moved inside the if
-        # block. Previously it always logged
-        # "Automatic Rollback Triggered"
-        # even when ransomware_detected was
-        # False and no rollback happened.
-        if event.get("ransomware_detected"):
-            rename_log.rollback()
+        should_lock_vault = bool(
+            event.get("confirmed_critical")
+            or event.get("ransomware_detected")
+            or int(event.get("repeat_count", 0)) >= 3
+        )
 
-            logger.critical(
-                "Automatic Rollback Triggered"
+        if should_lock_vault:
+            event_bus.publish({
+                "event_type": "VAULT_LOCKED",
+                "reason": event.get("event_type", "CRITICAL_THREAT"),
+                "severity": "CRITICAL",
+                "timestamp": time.time(),
+            })
+            activate_vault_lock(event.get("event_type", "CRITICAL_THREAT"))
+            containment_logger.info(
+                "EVENT=VAULT_LOCK | "
+                f"REASON={event.get('event_type', 'CRITICAL_THREAT')} | "
+                f"PID={pid}"
             )
-
-            email_sender.send_block_confirm(
-                files_restored=rename_log.last_rollback_count,
-                attacker_ip=event.get("attacker_ip"),
-            )
-
-        else:
-            logger.critical(
-                "Critical threat handled - no rollback needed"
-            )
-
-        # Vault lock now fires on ALL
-        # critical threats, not just brute
-        # force. Previously a ransomware
-        # critical would kill the process
-        # and rollback files but leave the
-        # vault wide open.
-        event_bus.publish({
-            "type":      "VAULT_LOCKED",
-            "reason":    event.get("type", "CRITICAL_THREAT"),
-            "severity":  "CRITICAL",
-            "timestamp": time.time(),
-        })
+            if event.get("email"):
+                vault_auth_manager.lock_vault(event["email"], reason=event.get("type", "CRITICAL_THREAT"), severity="CRITICAL")
 
         screenshot_path = self._capture_screenshot()
         email_sender.send_critical_alert(event, screenshot_path)
@@ -329,11 +603,18 @@ class ResponseEngine:
             )
 
             event_bus.publish({
-                "type":      "VAULT_LOCKED",
+                "event_type":      "VAULT_LOCKED",
                 "email":     email,
                 "severity":  "CRITICAL",
                 "timestamp": time.time(),
             })
+            activate_vault_lock("AUTH_BRUTE_FORCE")
+            containment_logger.info(
+                "EVENT=VAULT_LOCK | "
+                "REASON=AUTH_BRUTE_FORCE | "
+                f"EMAIL={email}"
+            )
+            vault_auth_manager.lock_vault(email, reason="AUTH_BRUTE_FORCE", severity="CRITICAL")
 
             email_sender.send_critical_alert(event)
 

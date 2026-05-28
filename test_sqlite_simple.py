@@ -4,10 +4,10 @@ import os
 print("Testing SQLite...")
 
 # Create logs folder
-os.makedirs("logs", exist_ok=True)
+os.makedirs("D:\\logs", exist_ok=True)
 
 # Connect to database
-db = sqlite3.connect("logs/test.db")
+db = sqlite3.connect("D:\\logs\\test.db")
 cursor = db.cursor()
 
 # Create test table
@@ -31,4 +31,4 @@ print(f"✓ SQLite is working! Result: {result}")
 db.close()
 
 # Cleanup
-os.remove("logs/test.db")
+os.remove("D:\\logs\\test.db")

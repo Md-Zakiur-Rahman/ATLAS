@@ -2,19 +2,13 @@
 ATLAS alert dispatch and response layer.
 """
 
-import logging
 from dataclasses import dataclass
 from datetime import datetime
 
+from config.logging_config import get_logger
 from monitor.models import ThreatLevel
 
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(message)s",
-)
-
-logger = logging.getLogger("ATLAS-AlertManager")
+logger = get_logger("alerts")
 
 
 @dataclass

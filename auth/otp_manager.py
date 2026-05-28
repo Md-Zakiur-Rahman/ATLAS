@@ -8,10 +8,13 @@ Handles:
 - AUTH_FAIL events
 - Failed attempt tracking
 """
-
-import logging
+import time
 from typing import Optional
 
+from config.logging_config import get_logger
+from core.runtime_state import runtime_state
+from core.session import session
+from core.crypto_service import activate_vault_lock
 from database.client import (
     supabase
 )
@@ -19,20 +22,7 @@ from database.client import (
 from monitor.event_bus import (
     event_bus
 )
-
-
-logging.basicConfig(
-    level=logging.INFO,
-    format=(
-        "%(asctime)s | "
-        "%(levelname)s | "
-        "%(message)s"
-    )
-)
-
-logger = logging.getLogger(
-    "ATLAS-OTPManager"
-)
+logger = get_logger("auth")
 
 
 class OTPManager:
@@ -71,11 +61,10 @@ class OTPManager:
 
             event_bus.publish(
                 {
+                    "event_type": "OTP_SENT",
                     "email": email,
-
-                    "options": {
-                                "should_create_user": True
-                                }
+                    "severity": "LOW",
+                    "timestamp": time.time(),
                     }
             )
 
@@ -90,13 +79,15 @@ class OTPManager:
 
             event_bus.publish(
                 {
-                    "type": "AUTH_FAIL",
+                    "event_type": "AUTH_FAIL",
 
                     "email": email,
 
                     "reason": (
                         "OTP_SEND_FAILED"
                     ),
+                    "severity": "MEDIUM",
+                    "timestamp": time.time(),
                 }
             )
 
@@ -138,19 +129,22 @@ class OTPManager:
 
                 event_bus.publish(
                     {
-                        "type": "AUTH_FAIL",
+                        "event_type": "AUTH_FAIL",
 
                         "email": email,
 
                         "reason": (
                             "INVALID_OTP"
                         ),
+                        "severity": "MEDIUM",
+                        "timestamp": time.time(),
                     }
                 )
 
                 logger.warning(
                     "OTP verification failed"
                 )
+                runtime_state.update(authenticated=False)
 
                 return False
 
@@ -164,10 +158,20 @@ class OTPManager:
 
             event_bus.publish(
                 {
-                    "type": "AUTH_SUCCESS",
-
+                    "event_type": "AUTH_SUCCESS",
                     "email": email,
+                    "auth_method": "otp",
+                    "severity": "LOW",
+                    "timestamp": time.time(),
                 }
+            )
+            session.set_user(email)
+            runtime_state.update(
+                current_user=email,
+                current_email=email,
+                authenticated=True,
+                auth_method="otp",
+                failed_otp_attempts=0,
             )
 
             logger.info(
@@ -190,13 +194,15 @@ class OTPManager:
 
             event_bus.publish(
                 {
-                    "type": "AUTH_FAIL",
+                    "event_type": "AUTH_FAIL",
 
                     "email": email,
 
                     "reason": (
                         "OTP_EXCEPTION"
                     ),
+                    "severity": "MEDIUM",
+                    "timestamp": time.time(),
                 }
             )
 
@@ -267,12 +273,15 @@ class OTPManager:
 
                 event_bus.publish(
                     {
-                        "type":
+                        "event_type":
                         "AUTH_BRUTE_FORCE",
 
                         "email": email,
+                        "severity": "CRITICAL",
+                        "timestamp": time.time(),
                     }
                 )
+                runtime_state.update(vault_locked=True, authenticated=False)
 
         except Exception as error:
 
@@ -365,6 +374,8 @@ class OTPManager:
                 "Vault locked for %s",
                 email
             )
+            runtime_state.update(vault_locked=True)
+            activate_vault_lock("OTP brute-force lock")
 
         except Exception as error:
 

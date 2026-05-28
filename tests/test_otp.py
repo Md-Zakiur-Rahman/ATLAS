@@ -2,6 +2,9 @@ from auth.otp_manager import (
     otp_manager
 )
 
-otp_manager.send_email_otp(
-    "zakbrainstrom50@gmail.com"
-)
+email = input("Enter your test email: ")
+if email:
+    otp_manager.send_email_otp(email)
+    print(f"OTP sent to {email}")
+else:
+    print("No email provided. Exiting.")

@@ -1,22 +1,26 @@
 import smtplib
 import socket
-import uuid
+import secrets
 import os
-import logging
+import hashlib # Keep hashlib as it's used later
 from datetime import datetime, timedelta
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.image import MIMEImage
+from config.logging_config import get_logger
+from core.runtime_state import runtime_state
 from database.client import supabase
 from core.session import session
 
-logger = logging.getLogger("ATLAS-EmailSender")
+logger = get_logger("emails")
 
 
 class EmailSender:
 
     def get_user_email(self) -> str:
         email = session.get_email()
+        if email is None:
+            email = runtime_state.snapshot().get("current_email")
 
         if email is None:
             logger.warning(
@@ -32,6 +36,9 @@ class EmailSender:
         body: str,
         screenshot_path: str = None
     ) -> None:
+
+        if runtime_state.snapshot().get("replay_active"):
+            return
 
         smtp_host = os.getenv("SMTP_HOST", "smtp.resend.com")
         smtp_port = os.getenv("SMTP_PORT", "465")
@@ -102,8 +109,10 @@ class EmailSender:
         if email is None:
             return
 
+        otp_hash = hashlib.sha256(otp_code.encode()).hexdigest()
+
         supabase.table("otp_sessions").insert({
-            "otp_code": otp_code,
+            "otp_code": otp_hash,
             "email": email,
             "expires_at": (datetime.utcnow() + timedelta(seconds=60)).isoformat(),
             "verified": False,
@@ -122,10 +131,12 @@ class EmailSender:
         )
 
     def verify_otp(self, otp_code: str) -> bool:
+        otp_hash = hashlib.sha256(otp_code.encode()).hexdigest()
+
         result = (
             supabase.table("otp_sessions")
             .select("*")
-            .eq("otp_code", otp_code)
+            .eq("otp_code", otp_hash)
             .eq("verified", False)
             .execute()
         )
@@ -152,7 +163,7 @@ class EmailSender:
         (
             supabase.table("otp_sessions")
             .update({"verified": True})
-            .eq("otp_code", otp_code)
+            .eq("otp_code", otp_hash)
             .execute()
         )
 
@@ -168,14 +179,17 @@ class EmailSender:
         if email is None:
             return
 
-        token = uuid.uuid4().hex
+        token = secrets.token_urlsafe(32)
 
-        supabase.table("otp_sessions").insert({
-            "otp_code": token,
+        token_hash = hashlib.sha256(token.encode()).hexdigest()
+
+        supabase.table("vault_lock_tokens").insert({
+            "token_hash": token_hash, # This is not an event_type, it's a column name. No change needed.
             "email": email,
             "expires_at": (datetime.utcnow() + timedelta(minutes=5)).isoformat(),
-            "verified": False,
-            "failed_attempts": 0,
+            "used": False,
+            "severity": event.get("severity", "CRITICAL"),
+            "threat_type": event.get("type", "UNKNOWN"),
         }).execute()
 
         host = socket.gethostname()
@@ -185,12 +199,16 @@ class EmailSender:
         except Exception:
             host_ip = "127.0.0.1"
 
-        lock_url = (
-            f"http://{host_ip}:5000/remote-lock?token={token}"
-        )
+        bio_state = runtime_state.snapshot().get("biometric_state", {})
+        base_url = bio_state.get("base_auth_url")
+
+        if not base_url:
+            base_url = f"http://{host_ip}:80"
+
+        lock_url = f"{base_url}/remote-lock?token={token}"
 
         body_lines = [
-            f"Threat type: {event.get('type')}",
+            f"Threat type: {event.get('event_type')}",
             f"Machine: {host}",
             f"Timestamp: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}",
         ]
@@ -227,7 +245,7 @@ class EmailSender:
             return
 
         body_lines = [
-            f"Threat type: {event.get('type')}",
+            f"Threat type: {event.get('event_type')}",
             f"Timestamp: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}",
             "Action taken: auto-handled",
         ]

@@ -5,10 +5,11 @@ from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, 
 from reportlab.lib import colors
 from datetime import datetime
 import os
+from core.runtime_state import runtime_state
 from database import db_manager
 
 class PDFReportGenerator:
-    def __init__(self, db=None, output_path="logs/"):
+    def __init__(self, db=None, output_path="D:\\logs"):
         self.db = db or db_manager.db
         self.output_path = output_path
         os.makedirs(output_path, exist_ok=True)
@@ -62,6 +63,7 @@ class PDFReportGenerator:
 
         stats = self.db.get_event_stats(hours=hours)
         enc_stats = self.db.get_encryption_stats(hours=hours)
+        runtime = runtime_state.snapshot()
 
         story.append(Paragraph("Executive Summary", heading_style))
         summary_data = [
@@ -70,6 +72,10 @@ class PDFReportGenerator:
             ["Critical Threats", str(stats["critical_threats"])],
             ["Files Encrypted", str(enc_stats["files_encrypted"])],
             ["Data Encrypted", f'{enc_stats["total_size_mb"]} MB'],
+            ["Threat Level", str(runtime.get("current_threat_level"))],
+            ["Anomaly Score", str(runtime.get("latest_anomaly_score"))],
+            ["Vault Locked", str(runtime.get("vault_locked"))],
+            ["Auth Method", str(runtime.get("auth_method"))],
         ]
 
         summary_table = Table(summary_data, colWidths=[3 * inch, 2 * inch])
@@ -106,6 +112,26 @@ class PDFReportGenerator:
             ]))
             story.append(threat_table)
             story.append(Spacer(1, 0.3 * inch))
+
+        story.append(Paragraph("Runtime Health", heading_style))
+        health_data = [
+            ["API", runtime.get("api_status")],
+            ["Dashboard", runtime.get("dashboard_status")],
+            ["Scheduler", runtime.get("scheduler_status")],
+            ["Supabase", runtime.get("supabase_status")],
+            ["Response Engine", "online" if runtime.get("response_engine_subscribed") else "offline"],
+            ["Monitors", str(runtime.get("monitor_states"))],
+            ["Connected Devices", ", ".join(runtime.get("connected_devices", [])) or "None"],
+        ]
+        health_table = Table(health_data, colWidths=[2 * inch, 4 * inch])
+        health_table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#0a0a0a")),
+            ("TEXTCOLOR", (0, 0), (-1, -1), colors.HexColor("#00ff00")),
+            ("GRID", (0, 0), (-1, -1), 1, colors.HexColor("#333333")),
+            ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+        ]))
+        story.append(health_table)
+        story.append(Spacer(1, 0.2 * inch))
 
         story.append(Paragraph("Recommendations", heading_style))
         for rec in [

@@ -6,23 +6,18 @@ events for the threat engine. Safe and blocked process decisions remain in the
 engine so all threat rules are evaluated in one place.
 """
 
-import logging
 import threading
 import time
 from typing import Dict, Optional, Set, Tuple
 from monitor.models import ThreatLevel
 import psutil
 
+from config.logging_config import get_logger
+from core.runtime_state import runtime_state
 from monitor import rules
 from monitor.event_bus import event_bus
 
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(message)s",
-)
-
-logger = logging.getLogger("ATLAS-ProcessMonitor")
+logger = get_logger("monitor")
 
 
 class ProcessMonitor:
@@ -40,6 +35,12 @@ class ProcessMonitor:
             return
 
         self._stop_event.clear()
+        # Preload currently running processes to avoid startup false positives.
+        self._seen_processes = set()
+        for process_info in self._iter_processes():
+            self._seen_processes.add(
+                (process_info["pid"], process_info["process_name"].lower())
+            )
         self._thread = threading.Thread(
             target=self._scan_loop,
             name="ATLAS-ProcessMonitor",
@@ -50,6 +51,7 @@ class ProcessMonitor:
             "Process Monitor Started (interval=%ss)",
             self.interval_seconds,
         )
+        runtime_state.set_nested("monitor_states", {"process_monitor": True})
 
     def stop(self) -> None:
         self._stop_event.set()
@@ -57,6 +59,7 @@ class ProcessMonitor:
             self._thread.join(timeout=self.interval_seconds + 1)
 
         logger.info("Process Monitor Stopped")
+        runtime_state.set_nested("monitor_states", {"process_monitor": False})
 
     def _scan_loop(self) -> None:
         while not self._stop_event.is_set():
@@ -86,7 +89,7 @@ class ProcessMonitor:
                 )
             event_bus.publish(
                 {
-                    "type": "PROCESS_DETECTED",
+                    "event_type": "PROCESS_DETECTED",
                     "process_name": process_info["process_name"],
                     "pid": process_info["pid"],
                     "exe": process_info.get("exe"),

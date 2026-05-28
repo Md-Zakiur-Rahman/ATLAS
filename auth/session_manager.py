@@ -7,11 +7,12 @@ Handles:
 - Logout cleanup
 - Session validation
 """
-
-import logging
 from datetime import datetime
 from typing import Optional
 
+from config.logging_config import get_logger
+from core.runtime_state import runtime_state
+from core.session import session
 from database.client import (
     supabase
 )
@@ -19,20 +20,7 @@ from database.client import (
 from monitor.event_bus import (
     event_bus
 )
-
-
-logging.basicConfig(
-    level=logging.INFO,
-    format=(
-        "%(asctime)s | "
-        "%(levelname)s | "
-        "%(message)s"
-    )
-)
-
-logger = logging.getLogger(
-    "ATLAS-SessionManager"
-)
+logger = get_logger("auth")
 
 
 class SessionManager:
@@ -66,10 +54,16 @@ class SessionManager:
             "Session created for %s",
             email
         )
+        session.set_user(email)
+        runtime_state.update(
+            current_user=email,
+            current_email=email,
+            authenticated=True,
+        )
 
         event_bus.publish(
             {
-                "type":
+                "event_type":
                 "SESSION_CREATED",
 
                 "email": email,
@@ -93,7 +87,7 @@ class SessionManager:
 
             event_bus.publish(
                 {
-                    "type":
+                    "event_type":
                     "SESSION_DESTROYED",
 
                     "email":
@@ -106,6 +100,13 @@ class SessionManager:
         self.session_active = False
 
         self.login_time = None
+        session.clear()
+        runtime_state.update(
+            current_user=None,
+            current_email=None,
+            authenticated=False,
+            auth_method=None,
+        )
 
     # =====================================================
     # Session State
@@ -114,14 +115,12 @@ class SessionManager:
     def is_authenticated(
         self
     ) -> bool:
-
-        return self.session_active
+        return bool(runtime_state.snapshot().get("authenticated"))
 
     def get_current_user(
         self
     ) -> Optional[str]:
-
-        return self.current_user
+        return runtime_state.snapshot().get("current_email")
 
     def get_login_time(
         self

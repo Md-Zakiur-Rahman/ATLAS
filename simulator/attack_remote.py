@@ -5,7 +5,6 @@ Simulates a 5-phase attack against a configurable remote target.
 Reads settings from simulator/sim_config.json.
 Run from ATLAS root: py -3.10 simulator/attack_remote.py
 """
-
 import json
 import logging
 import os
@@ -16,18 +15,21 @@ import socket
 import string
 import threading
 import time
+import sys
 from pathlib import Path
+from config.logging_config import get_logger
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 
 with open("simulator/sim_config.json") as f:
     CONFIG = json.load(f)
 
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(message)s",
-)
-logger = logging.getLogger("ATLAS-AttackSim")
+logger = get_logger("simulator")
+containment_handler = logging.FileHandler(os.path.join("D:\\logs", "containment.log"), mode="a", encoding="utf-8")
+containment_handler.setFormatter(logging.Formatter("%(asctime)s | %(message)s"))
+logger.addHandler(containment_handler)
 
 
 def phase_1_port_scan() -> None:
@@ -166,6 +168,7 @@ def _print_phase_header(n: int, name: str) -> None:
 
 
 def main() -> None:
+    logger.info("EVENT=ATTACK_SIM_START | TYPE=REMOTE | SAFE_MODE=%s", CONFIG.get("safe_mode"))
     if CONFIG.get("safe_mode"):
         logger.warning(
             "safe_mode is True in sim_config.json. "
@@ -185,6 +188,7 @@ def main() -> None:
         _print_phase_header(index, name)
         phase_fn()
         time.sleep(CONFIG["phase_delay_seconds"])
+    logger.info("EVENT=ATTACK_SIM_END | TYPE=REMOTE")
 
 
 if __name__ == "__main__":

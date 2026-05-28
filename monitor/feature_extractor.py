@@ -19,26 +19,15 @@ FIXES APPLIED:
 
 import threading
 import time
-import logging
 from collections import deque
 from datetime import datetime
 from typing import Dict, List
 
 import psutil
+from config.logging_config import get_logger
 from monitor.event_bus import event_bus
 
-logging.basicConfig(
-    level=logging.INFO,
-    format=(
-        "%(asctime)s | "
-        "%(levelname)s | "
-        "%(message)s"
-    )
-)
-
-logger = logging.getLogger(
-    "ATLAS-FeatureExtractor"
-)
+logger = get_logger("ml")
 
 class FeatureExtractor:
 
@@ -96,6 +85,7 @@ class FeatureExtractor:
         files_renamed = 0
         outbound_connections = 0
         failed_auth_attempts = 0
+        unique_suspicious_ips = set()
 
         # ── FIX 2 ───────────────────────
         # Use a per-call set so
@@ -120,7 +110,7 @@ class FeatureExtractor:
             # ────────────────────────────
 
             event_type = event.get(
-                "type", ""
+                "event_type", ""
             )
 
             if event_type == "FILE_MODIFIED":
@@ -145,7 +135,14 @@ class FeatureExtractor:
                 # ────────────────────────
 
             elif event_type == "NETWORK_CONNECTION":
-                outbound_connections += 1
+                # Count only suspicious network activity for ML signal stability.
+                # Normal browser bursts should not dominate anomaly scoring.
+                if bool(event.get("suspicious")) and bool(event.get("risk_reasons")):
+                    remote_ip = event.get("remote_ip")
+                    if remote_ip:
+                        unique_suspicious_ips.add(str(remote_ip))
+                    else:
+                        outbound_connections += 1
 
             elif event_type == "AUTH_FAIL":
                 failed_auth_attempts += 1
@@ -154,6 +151,7 @@ class FeatureExtractor:
         # Count of DISTINCT new processes
         # seen in this 10-second window.
         new_processes = len(window_processes)
+        outbound_connections += min(len(unique_suspicious_ips), 3)
         # ────────────────────────────────
 
         cpu_percent = psutil.cpu_percent()
@@ -176,7 +174,7 @@ class FeatureExtractor:
             feature_vector
         )
 
-        logger.info(
+        logger.debug(
             "Feature Vector Built: %s",
             feature_vector
         )

@@ -5,28 +5,15 @@ Tracks file rename activity and
 supports rollback restoration.
 """
 
-import logging
 import os
 from collections import deque
 from typing import Deque, Dict
 
+from config.logging_config import get_logger
 from monitor.event_bus import (
     event_bus
 )
-
-
-logging.basicConfig(
-    level=logging.INFO,
-    format=(
-        "%(asctime)s | "
-        "%(levelname)s | "
-        "%(message)s"
-    )
-)
-
-logger = logging.getLogger(
-    "ATLAS-RenameLog"
-)
+logger = get_logger("events")
 
 
 class RenameLog:
@@ -49,7 +36,7 @@ class RenameLog:
     ) -> None:
 
         if (
-            event.get("type")
+            event.get("event_type")
             != "FILE_RENAMED"
         ):
             return

@@ -6,10 +6,11 @@ Usage:
 """
 
 import argparse
-import logging
 import time
 import sys
 from pathlib import Path
+
+from config.logging_config import get_logger
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -20,13 +21,7 @@ from monitor.event_bus import event_bus
 from monitor.response_engine import response_engine
 from notifications import notification_manager
 
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(message)s",
-)
-
-logger = logging.getLogger("ATLAS-NotificationTest")
+logger = get_logger("test")
 
 
 def publish_test_events(email: str) -> None:
@@ -39,30 +34,30 @@ def publish_test_events(email: str) -> None:
 
     events = [
         {
-            "type": "OTP_SENT",
+            "event_type": "OTP_SENT", # Changed 'type' to 'event_type'
             "email": email,
             "timestamp": time.time(),
         },
         {
-            "type": "AUTH_SUCCESS",
+            "event_type": "AUTH_SUCCESS", # Changed 'type' to 'event_type'
             "email": email,
             "timestamp": time.time(),
         },
         {
-            "type": "AUTH_FAIL",
+            "event_type": "AUTH_FAIL", # Changed 'type' to 'event_type'
             "email": email,
             "reason": "TEST_INVALID_OTP",
             "timestamp": time.time(),
         },
         {
-            "type": "AUTH_BRUTE_FORCE",
+            "event_type": "AUTH_BRUTE_FORCE", # Changed 'type' to 'event_type'
             "email": email,
             "reason": "TEST_BRUTE_FORCE",
             "severity": "CRITICAL",
             "timestamp": time.time(),
         },
         {
-            "type": "ML_ANOMALY",
+            "event_type": "ML_ANOMALY", # Changed 'type' to 'event_type'
             "email": email,
             "score": -0.82,
             "severity": "HIGH",
@@ -71,7 +66,7 @@ def publish_test_events(email: str) -> None:
             "timestamp": time.time(),
         },
         {
-            "type": "ML_ANOMALY",
+            "event_type": "ML_ANOMALY", # Changed 'type' to 'event_type'
             "email": email,
             "score": -0.95,
             "severity": "CRITICAL",
@@ -83,7 +78,7 @@ def publish_test_events(email: str) -> None:
     ]
 
     for index, event in enumerate(events, start=1):
-        logger.info("Publishing test event %d/%d: %s", index, len(events), event["type"])
+        logger.info("Publishing test event %d/%d: %s", index, len(events), event["event_type"])
         event_bus.publish(event)
         time.sleep(1)
 

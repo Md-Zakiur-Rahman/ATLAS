@@ -12,16 +12,12 @@ from typing import Set
 
 import psutil
 
+from core.runtime_state import runtime_state
+from config.logging_config import get_logger
 from monitor import rules
 from monitor.event_bus import event_bus
 
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(message)s"
-)
-
-logger = logging.getLogger("ATLAS-USBMonitor")
+logger = get_logger("usb_monitor")
 
 
 class USBMonitor:
@@ -49,6 +45,7 @@ class USBMonitor:
         self._thread.start()
 
         logger.info("USB Monitor Started")
+        runtime_state.set_nested("monitor_states", {"usb_monitor": True})
 
     def stop(self):
 
@@ -58,6 +55,7 @@ class USBMonitor:
             self._thread.join(timeout=2)
 
         logger.info("USB Monitor Stopped")
+        runtime_state.set_nested("monitor_states", {"usb_monitor": False})
 
     def _monitor_loop(self):
 
@@ -73,13 +71,17 @@ class USBMonitor:
 
         current_devices = set()
 
-        for partition in psutil.disk_partitions():
+        for partition in psutil.disk_partitions(all=False):
             logger.info(
                 "Detected Partition: %s",
                 partition.device
                 )
 
             try:
+
+                options = partition.opts.lower() if partition.opts else ""
+                if "removable" not in options:
+                    continue
 
                 device = partition.device
 
@@ -96,7 +98,7 @@ class USBMonitor:
 
                     event_bus.publish(
                         {
-                            "type": "USB_DEVICE_CONNECTED",
+                            "event_type": "USB_DEVICE_CONNECTED",
                             "device": device,
                             "timestamp": time.time()
                         }
@@ -110,6 +112,7 @@ class USBMonitor:
                 )
 
         self.known_devices = current_devices
+        runtime_state.set_devices(sorted(current_devices))
 
 
 usb_monitor = USBMonitor()

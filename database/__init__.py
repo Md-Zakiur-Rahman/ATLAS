@@ -1,4 +1,6 @@
 # database/__init__.py
+from dotenv import load_dotenv
+load_dotenv()
 from .db_manager import (
     log_event,
     get_events,

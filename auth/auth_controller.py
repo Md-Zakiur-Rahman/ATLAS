@@ -8,10 +8,9 @@ Handles:
 - Authentication event orchestration
 - Session state
 """
-
-import logging
 from typing import Optional
 
+from config.logging_config import get_logger
 from auth.otp_manager import (
     otp_manager
 )
@@ -19,20 +18,7 @@ from auth.otp_manager import (
 from monitor.event_bus import (
     event_bus
 )
-
-
-logging.basicConfig(
-    level=logging.INFO,
-    format=(
-        "%(asctime)s | "
-        "%(levelname)s | "
-        "%(message)s"
-    )
-)
-
-logger = logging.getLogger(
-    "ATLAS-AuthController"
-)
+logger = get_logger("auth")
 
 
 class AuthController:
@@ -67,7 +53,7 @@ class AuthController:
 
             event_bus.publish(
                 {
-                    "type":
+                    "event_type":
                     "LOGIN_STARTED",
 
                     "email": email,
@@ -116,7 +102,7 @@ class AuthController:
 
             event_bus.publish(
                 {
-                    "type":
+                    "event_type":
                     "LOGIN_SUCCESS",
 
                     "email": email,
@@ -133,7 +119,7 @@ class AuthController:
 
         event_bus.publish(
             {
-                "type":
+                "event_type":
                 "LOGIN_FAILED",
 
                 "email": email,
@@ -167,7 +153,7 @@ class AuthController:
 
         event_bus.publish(
             {
-                "type": "LOGOUT"
+                "event_type": "LOGOUT"
             }
         )
 

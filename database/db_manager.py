@@ -8,23 +8,21 @@ Unified implementation for database operations. Uses the existing
 """
 
 from __future__ import annotations
-
+from dotenv import load_dotenv
+load_dotenv()
 import os
 import json
 import csv
-import logging
 import time
 from hashlib import sha256
 from datetime import datetime, timedelta
 from typing import List, Tuple, Optional
 
+from config.logging_config import get_logger
 from database.client import supabase
 from monitor.event_bus import event_bus
 
-
-LOG_FORMAT = "%(asctime)s | %(levelname)s | %(message)s"
-logging.basicConfig(level=logging.INFO, format=LOG_FORMAT)
-logger = logging.getLogger("ATLAS-DBManager")
+logger = get_logger("database")
 
 
 # Whitelist file path
@@ -115,7 +113,7 @@ class DBManager:
         is_clean, message = self.verify_chain()
         if not is_clean:
             event_bus.publish({
-                "type": "CHAIN_TAMPERED",
+                "event_type": "CHAIN_TAMPERED",
                 "detail": message,
                 "severity": "CRITICAL",
                 "timestamp": time.time(),

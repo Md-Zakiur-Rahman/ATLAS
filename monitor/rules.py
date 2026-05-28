@@ -79,21 +79,25 @@ THREAT_SCORES = {
 
     # Behavioral Threats
     "OFF_HOURS_ACTIVITY": 15,
+    "ML_BORDERLINE_ANOMALY": 4,
+    "ML_CONFIRMED_ANOMALY": 10,
+    "NETWORK_SUSPICIOUS": 8,
+    "REPEATED_SUSPICIOUS": 6,
 }
 
 
 THREAT_LEVEL_THRESHOLDS = {
-
+    "SUSPICIOUS": 45,
     "LOW": 0,
     "MEDIUM": 30,
-    "HIGH": 60,
+    "HIGH": 65,
     "CRITICAL": 90,
 }
 
 
-THREAT_SCORE_DECAY = 5
+THREAT_SCORE_DECAY = 3
 
-THREAT_SCORE_DECAY_INTERVAL_SECONDS = 60
+THREAT_SCORE_DECAY_INTERVAL_SECONDS = 30
 
 # =========================================================
 # Suspicious Extensions
@@ -167,7 +171,7 @@ OFF_HOURS_START = 0
 
 OFF_HOURS_END = 6
 
-OFF_HOURS_ALERT_COOLDOWN_SECONDS = 60
+OFF_HOURS_ALERT_COOLDOWN_SECONDS = 300
 # =========================================================
 # USB Monitoring
 # =========================================================

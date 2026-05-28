@@ -1,52 +1,45 @@
-# Environment
+# Environment / Secrets
 .env
-.env.example/
-venv/
-env/
-
-# Secrets
+.env.*
+*.env
+secrets.json
 config/secrets.py
 
-# Python
+# Python Cache / Build
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
-.Python
-*.so
-*.egg
+build/
+dist/
 *.egg-info/
 
-# Build
-dist/
-build/
-installer/output/
-
-# ML Assets
-assets/model.pkl
+# Local Databases / Runtime State
+storage/
+logs/
 assets/feature_history.json
 assets/training_state.json
-
-# Database / Logs
+assets/incident.png
+assets/qr_*.png
 *.db
-*.key
-*.keyfile
-logs/
+*.sqlite
+*.sqlite3
 
-# IDE
+# Vault files
+vault.keyfile
+vault.locked
+vault/
+
+# NGROK / Local Tunnel State
+.ngrok2/
+ngrok.yml
+
+# Local Test Outputs
+D:/ATLAS_TEST/
+ATLAS_TEST/
+
+# IDE / System Files
 .vscode/
 .idea/
-*.swp
-*.swo
-
-# OS
 .DS_Store
 Thumbs.db
-
-# Testing
-.pytest_cache/
-.coverage
-htmlcov/
-
-# Executables
-*.exe

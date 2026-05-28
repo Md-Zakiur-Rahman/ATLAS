@@ -7,12 +7,12 @@ Handles:
 - SMTP email delivery for security alerts
 """
 
-import logging
 import os
 import smtplib
 from datetime import datetime
 from email.mime.text import MIMEText
 
+from config.logging_config import get_logger
 from database.client import (
     supabase
 )
@@ -20,20 +20,7 @@ from database.client import (
 from monitor.event_bus import (
     event_bus
 )
-
-
-logging.basicConfig(
-    level=logging.INFO,
-    format=(
-        "%(asctime)s | "
-        "%(levelname)s | "
-        "%(message)s"
-    )
-)
-
-logger = logging.getLogger(
-    "ATLAS-NotificationManager"
-)
+logger = get_logger("emails")
 
 
 class NotificationManager:
@@ -81,7 +68,7 @@ class NotificationManager:
         event: dict
     ) -> None:
 
-        event_type = event.get("type")
+        event_type = event.get("event_type")
 
         if event_type not in (
             "AUTH_BRUTE_FORCE",

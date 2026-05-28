@@ -15,7 +15,7 @@ def test_database():
     from database.db_manager import DatabaseManager
     
     # Initialize
-    db = DatabaseManager("logs/test_events.db")
+    db = DatabaseManager("D:\\logs\\test_events.db")
     
     # Log event
     event_id = db.log_event("TEST_EVENT", "LOW", {"test": "data"})
@@ -42,12 +42,12 @@ def test_database():
     print(f"  ✓ Stats - Total Events: {stats['total_events']}, Critical Threats: {stats['critical_threats']}")
     
     # Export CSV
-    db.export_events_csv("logs/test_export.csv")
+    db.export_events_csv("D:\\logs\\test_export.csv")
     print(f"  ✓ Exported events to CSV")
     
     # Cleanup
-    os.remove("logs/test_events.db")
-    os.remove("logs/test_export.csv")
+    os.remove("D:\\logs\\test_events.db")
+    os.remove("D:\\logs\\test_export.csv")
     
     return True
 

@@ -5,19 +5,13 @@ The bus provides synchronous fan-out to subscribers while also retaining a
 queue of published events for future consumers such as GUI listeners, database
 logging, response engines, and ML detectors.
 """
-
-import logging
 from queue import Empty, Queue
 from threading import Lock, RLock
 from typing import Callable, Dict, List
 
+from config.logging_config import get_logger
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(message)s",
-)
-
-logger = logging.getLogger("ATLAS-EventBus")
+logger = get_logger("events")
 
 
 class EventBus:
@@ -57,7 +51,7 @@ class EventBus:
         """Publish an event and notify a stable subscriber snapshot."""
 
         self.event_queue.put(event)
-        event_type = event.get("type", "UNKNOWN")
+        event_type = event.get("event_type", "UNKNOWN")
         if event_type == "PROCESS_DETECTED":
             logger.debug("Event Published: %s", event_type)
         else:
@@ -96,7 +90,7 @@ if __name__ == "__main__":
     event_bus.subscribe(test_listener)
     event_bus.publish(
         {
-            "type": "FILE_MODIFIED",
+            "event_type": "FILE_MODIFIED",
             "path": "D:/test/sample.txt",
         }
     )

@@ -9,6 +9,7 @@ ATLAS is a modular, Blue Team-oriented security platform combining real-time mon
 - [Installation](#installation)
 - [Usage](#usage)
 - [Architecture](#architecture)
+- [How ATLAS Works](#how-atlas-works)
 - [Database](#database)
 - [API](#api)
 - [Tests](#tests)
@@ -35,90 +36,127 @@ ATLAS is a comprehensive Blue Team Threat Detection System that monitors, analyz
 - **Device Fingerprinting** — identify and track devices
 - **Windows Installer** — standalone executable with InnoSetup
 
+## Architecture Diagram
+
+```text
++----------------+   +----------------+   +----------------+   +---------------+
+|  File Monitor  |   | Process Monitor|   | Network Monitor|   |  USB Monitor  |
++----------------+   +----------------+   +----------------+   +---------------+
+        |                    |                    |                    |
+        | (File Events)      | (Proc. Events)     | (Net. Events)      | (USB Events)
+        v                    v                    v                    v
++-----------------------------------------------------------------------------+
+|                                                                             |
+|                             EVENT BUS (Central Queue)                         |
+|                                                                             |
++-----------------------------------------------------------------------------+
+        |                    |                    |                    |
+        |                    |                    |                    |
++-------v--------+  +--------v---------+  +-------v--------+  +--------v-------+
+|                |  |                  |  |                |  |                |
+|  Threat Engine |  | Feature Extractor|  | Response Engine|  | Database Manager|
+| (Rule-Based)   |  | (ML Vectorizer)  |  | (Containment)  |  | (Logging)      |
+|                |  |                  |  |                |  |                |
++----------------+  +------------------+  +----------------+  +----------------+
+        |                    |                    |                    |
+        | (Rule Alerts)      | (Feature Vector)   | (Actions)          | (DB Writes)
+        v                    v                    v                    v
++----------------+  +------------------+  +----------------+  +----------------+
+|                |  |                  |  |                |  |                |
+|  Dashboard UI  |  |   ML Detector    |  | - Kill Process |  |    Supabase    |
+|                |  | (Anomaly Score)  |  | - Lock Vault   |  |    (Cloud)     |
+|                |  |                  |  | - Email Alert  |  |                |
++----------------+  +------------------+  +----------------+  +----------------+
+                             |
+                             | (ML Anomaly Alert)
+                             v
+                   (Back to Event Bus)
+```
+
+## How ATLAS Works
+
+ATLAS operates on a decoupled, event-driven architecture that allows for modular and parallel processing of security telemetry.
+
+### 1. Real-Time Monitoring & Event Bus
+-   Multiple monitors (`File`, `Process`, `Network`, `USB`) run in the background, watching for system activity.
+-   When an event occurs (e.g., a file is created), the monitor publishes a standardized message to a central, thread-safe **Event Bus**.
+
+### 2. Parallel Analysis
+Once an event is on the bus, several subscribers process it simultaneously:
+-   **Threat Engine**: Checks the event against a set of predefined rules (`monitor/rules.py`). If a rule is matched (e.g., a suspicious process name is detected), it generates a rule-based alert.
+-   **Feature Extractor**: Collects all events over a 10-second window and converts them into a numerical **feature vector**. This vector is a snapshot of system behavior (e.g., `[files_modified, new_processes, cpu_usage, ...]`).
+-   **Response Engine**: Listens for high-severity alerts and takes immediate action.
+-   **Database Manager**: Logs key events to a secure Supabase backend.
+-   **Risk Engine**: Consumes events to calculate a cumulative risk score that decays over time, providing a more nuanced assessment of the system's threat level than individual alerts alone.
+
+### 3. ML Anomaly Detection
+-   The **ML Detector** takes the latest feature vector from the extractor.
+-   It uses a pre-trained **Isolation Forest** model to calculate an anomaly score. A lower score indicates a more unusual or anomalous pattern of behavior.
+-   If the score crosses a dynamically calibrated threshold, the detector publishes a new `ML_ANOMALY` event back onto the bus, which can trigger higher-level alerts.
+
+### 4. Automated Response & Containment
+-   The **Response Engine** is the system's active defense layer. Based on the severity of an alert, it can terminate malicious processes, lock the **Vault**, blacklist attacker IPs, and send critical alert notifications via email.
+
 ## 📁 Project Structure
 
 ```text
 ATLAS/
-├── main.py                        # Main entry point
-├── attack_simulator.py            # Top-level attack simulator
+├── main.py                        # Main application entry point
 ├── requirements.txt
+├── .env.example                   # Environment variable template
+├── .gitignore
 ├── README.md
 │
-├── api/                           # Flask API
-│   ├── flask_app.py
-│   └── assets/
-│       ├── feature_history.json
-│       └── training_state.json
+├── api/                           # Flask API for remote actions & WebAuthn
+│   └── flask_app.py
 │
-├── auth/                          # Auth helpers
-│   ├── auth_controller.py
+├── auth/                          # Authentication logic
+│   ├── biometric_manager.py
 │   ├── otp_manager.py
 │   └── session_manager.py
 │
-├── config/
-│   ├── secrets.example.py
-│   └── secrets.py                 # DO NOT COMMIT
-│
-├── core/
-│   └── session.py
+├── core/                          # Core services and state management
+│   ├── runtime_state.py
+│   ├── crypto_service.py
+│   └── vault.py
 │
 ├── dashboard/                     # GUI Layer (CustomTkinter)
-│   ├── app.py
+│   ├── app.py                     # Main GUI application
 │   ├── dashboard_tab.py
 │   ├── logs_tab.py
 │   ├── timeline_tab.py
-│   ├── network_tab.py
-│   ├── encrypt_tab.py
-│   ├── report_tab.py
-│   ├── settings_tab.py
-│   ├── alerts.py
-│   ├── animations.py
-│   ├── ui_polish.py
-│   └── pdf_generator.py
+│   └── ... (other UI tabs)
 │
-├── database/                      # Supabase layer
+├── database/                      # Supabase integration layer
 │   ├── client.py
 │   ├── db_manager.py
-│   └── schema.sql
+│   └── schema.sql                 # Reference schema
 │
-├── monitor/                       # Detection core
+├── monitor/                       # Real-time detection core
 │   ├── event_bus.py
 │   ├── file_monitor.py
 │   ├── process_monitor.py
 │   ├── network_monitor.py
-│   ├── usb_monitor.py
-│   ├── threat_engine.py
-│   ├── alert_manager.py
-│   ├── response_engine.py
-│   ├── ml_detector.py
-│   ├── feature_extractor.py
-│   ├── rename_log.py
-│   ├── rules.py
-│   └── models.py
+│   ├── threat_engine.py           # Rule-based detection
+│   ├── response_engine.py         # Automated containment
+│   ├── ml_detector.py             # Anomaly detection
+│   ├── risk_engine.py             # Cumulative risk scoring
+│   └── feature_extractor.py       # ML feature vector creation
 │
-├── notifications/                 # Email alerts
-│   ├── manager.py
+├── notifications/                 # Email alert system
 │   └── email_sender.py
 │
-├── simulator/                     # Attack simulation
-│   ├── attack_sim.py
+├── simulator/                     # Attack simulation scripts
+│   ├── attack_sim.py              # Local simulation
 │   ├── attack_remote.py
 │   ├── sim_config.json
-│   └── test_targets/
 │
-├── logs/                          # Generated exports
-│   ├── events_export_*.csv
-│   └── threat_report_*.csv
-│
-├── tests/
-│   ├── test_event_bus.py
+├── tests/                         # Unit and integration tests
 │   ├── test_otp.py
-│   ├── test_supabase.py
-│   ├── test_threat_engine.py
-│   └── test_verify.py
+│
+├── assets/                        # (gitignored) Runtime assets
 │
 ├── build_windows.bat
-├── build_windows.ps1
 └── build.spec
 ```
 

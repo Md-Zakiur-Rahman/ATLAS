@@ -21,14 +21,7 @@ import time
 from pathlib import Path
 
 from monitor import rules
-
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(message)s",
-)
-
-logger = logging.getLogger("ATLAS-AttackSimulator")
+logger = get_logger("attack_simulator")
 
 
 INTENSITY_PROFILES = {
