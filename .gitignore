@@ -32,6 +32,7 @@ vault.locked
 vault/
 
 # NGROK / Local Tunnel State
+.ngrok_url
 .ngrok2/
 ngrok.yml
 
