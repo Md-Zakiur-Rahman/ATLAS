@@ -1,266 +1,198 @@
-# 🛡️ ATLAS — Adaptive Threat Level Assessment & Security System
+# ATLAS
 
-ATLAS is a modular, Blue Team-oriented security platform combining real-time monitoring, ML-based anomaly detection, and a modern GUI dashboard. Built for security teams who need actionable intelligence fast.
+**Adaptive Threat Level Assessment & Security System** — a Windows-focused Blue Team desktop application for monitoring host activity, detecting suspicious behavior, and coordinating containment from one dashboard.
 
-## 📋 Table of Contents
-- [Overview](#overview)
-- [Features](#features)
-- [Project Structure](#project-structure)
-- [Installation](#installation)
-- [Usage](#usage)
-- [Architecture](#architecture)
-- [How ATLAS Works](#how-atlas-works)
-- [Database](#database)
-- [API](#api)
-- [Tests](#tests)
-- [Building for Windows](#building-for-windows)
+ATLAS collects file, process, USB, and network telemetry; sends it through a shared event bus; evaluates it with rules, risk scoring, and an Isolation Forest anomaly detector; and presents the result in a CustomTkinter analyst dashboard. Critical detections can trigger containment actions, alerts, and a remotely initiated vault lock.
 
-## 🎯 Overview
+> This is a defensive monitoring project. Run it only on systems and directories you own or are authorized to administer. The included simulators modify only their configured test directory, but should still be used in a disposable test environment.
 
-ATLAS is a comprehensive Blue Team Threat Detection System that monitors, analyzes, and responds to security threats in real-time. It combines a CustomTkinter GUI dashboard with a Python backend featuring filesystem monitoring, ML anomaly scoring, network monitoring, Flask API, and Supabase cloud storage.
+## Features
 
-## ✨ Features
+- Real-time file, process, USB, and network monitoring
+- Thread-safe event bus with rule-based threat detection and cumulative risk scoring
+- ML baseline collection and Isolation Forest anomaly detection
+- Automated response hooks for high-severity events: process termination, IP blocking, vault locking, and alerting
+- CustomTkinter dashboard with timeline, network, event log, reports, settings, encryption/decryption, and whitelist views
+- Password-plus-MFA login with email OTP; optional WebAuthn/passkey pairing through a QR flow
+- Supabase persistence for authentication, events, alerts, biometric sessions, and remote-lock tokens
+- Flask API with rate limiting, health check, MFA endpoints, passkey routes, and remote vault locking
+- PDF incident reports and SMTP/Resend email notifications
+- Local, configurable attack simulation for validating detection behavior
 
-- **Real-Time Filesystem Monitoring** — watchdog-based file event capture
-- **ML Anomaly Scoring** — Isolation Forest model with auto-calibrated thresholds
-- **Process & System Inspection** — psutil-based process monitoring
-- **Thread-Safe Event Bus** — decoupled pub/sub architecture
-- **Hash-Chain Tamper Detection** — cryptographic log integrity verification
-- **Network Monitoring** — connection tracking with IP threat flagging
-- **Interactive Timeline Visualization** — matplotlib scatter with event detail cards
-- **File Encryption/Decryption** — AES-256 secure file operations
-- **Automated Report Generation** — PDF threat reports via ReportLab
-- **Email & Notification Alerts** — Resend SMTP for security event alerts
-- **HTTP API** — Flask with rate limiting and remote lock endpoint
-- **Attack Simulator** — 5-phase attack simulation for demo and testing
-- **Device Fingerprinting** — identify and track devices
-- **Windows Installer** — standalone executable with InnoSetup
-
-## Architecture Diagram
+## Architecture
 
 ```text
-+----------------+   +----------------+   +----------------+   +---------------+
-|  File Monitor  |   | Process Monitor|   | Network Monitor|   |  USB Monitor  |
-+----------------+   +----------------+   +----------------+   +---------------+
-        |                    |                    |                    |
-        | (File Events)      | (Proc. Events)     | (Net. Events)      | (USB Events)
-        v                    v                    v                    v
-+-----------------------------------------------------------------------------+
-|                                                                             |
-|                             EVENT BUS (Central Queue)                         |
-|                                                                             |
-+-----------------------------------------------------------------------------+
-        |                    |                    |                    |
-        |                    |                    |                    |
-+-------v--------+  +--------v---------+  +-------v--------+  +--------v-------+
-|                |  |                  |  |                |  |                |
-|  Threat Engine |  | Feature Extractor|  | Response Engine|  | Database Manager|
-| (Rule-Based)   |  | (ML Vectorizer)  |  | (Containment)  |  | (Logging)      |
-|                |  |                  |  |                |  |                |
-+----------------+  +------------------+  +----------------+  +----------------+
-        |                    |                    |                    |
-        | (Rule Alerts)      | (Feature Vector)   | (Actions)          | (DB Writes)
-        v                    v                    v                    v
-+----------------+  +------------------+  +----------------+  +----------------+
-|                |  |                  |  |                |  |                |
-|  Dashboard UI  |  |   ML Detector    |  | - Kill Process |  |    Supabase    |
-|                |  | (Anomaly Score)  |  | - Lock Vault   |  |    (Cloud)     |
-|                |  |                  |  | - Email Alert  |  |                |
-+----------------+  +------------------+  +----------------+  +----------------+
-                             |
-                             | (ML Anomaly Alert)
-                             v
-                   (Back to Event Bus)
+File / Process / USB / Network monitors
+                 |
+                 v
+           Event bus
+     /       |        |        \
+Rules   Feature extractor  Risk engine  Database / dashboard
+             |
+             v
+        ML detector
+             |
+             v
+       Response engine --> containment, alerts, vault lock
 ```
 
-## How ATLAS Works
+The normal launcher starts all monitors and analysis services in background threads, starts the Flask API, then runs the dashboard on the main thread. In baseline-training mode, it runs only the lightweight file, process, network, feature-extraction services; UI, API, alerts, and active containment are deliberately not started.
 
-ATLAS operates on a decoupled, event-driven architecture that allows for modular and parallel processing of security telemetry.
-
-### 1. Real-Time Monitoring & Event Bus
--   Multiple monitors (`File`, `Process`, `Network`, `USB`) run in the background, watching for system activity.
--   When an event occurs (e.g., a file is created), the monitor publishes a standardized message to a central, thread-safe **Event Bus**.
-
-### 2. Parallel Analysis
-Once an event is on the bus, several subscribers process it simultaneously:
--   **Threat Engine**: Checks the event against a set of predefined rules (`monitor/rules.py`). If a rule is matched (e.g., a suspicious process name is detected), it generates a rule-based alert.
--   **Feature Extractor**: Collects all events over a 10-second window and converts them into a numerical **feature vector**. This vector is a snapshot of system behavior (e.g., `[files_modified, new_processes, cpu_usage, ...]`).
--   **Response Engine**: Listens for high-severity alerts and takes immediate action.
--   **Database Manager**: Logs key events to a secure Supabase backend.
--   **Risk Engine**: Consumes events to calculate a cumulative risk score that decays over time, providing a more nuanced assessment of the system's threat level than individual alerts alone.
-
-### 3. ML Anomaly Detection
--   The **ML Detector** takes the latest feature vector from the extractor.
--   It uses a pre-trained **Isolation Forest** model to calculate an anomaly score. A lower score indicates a more unusual or anomalous pattern of behavior.
--   If the score crosses a dynamically calibrated threshold, the detector publishes a new `ML_ANOMALY` event back onto the bus, which can trigger higher-level alerts.
-
-### 4. Automated Response & Containment
--   The **Response Engine** is the system's active defense layer. Based on the severity of an alert, it can terminate malicious processes, lock the **Vault**, blacklist attacker IPs, and send critical alert notifications via email.
-
-## 📁 Project Structure
+## Repository layout
 
 ```text
 ATLAS/
-├── main.py                        # Main application entry point
+├── main.py                 # Main runtime and ML training entry point
+├── api/                    # Flask API and WebAuthn routes
+├── auth/                   # Password, OTP, session, and biometric flows
+├── config/                 # Logging and secrets template
+├── core/                   # Vault, cryptography, keys, and runtime state
+├── dashboard/              # CustomTkinter analyst interface and reports
+├── database/               # Supabase client, persistence helpers, schema reference
+├── monitor/                # Monitors, event bus, rules, ML, risk, and response engines
+├── notifications/          # Email and notification delivery
+├── simulator/              # Safe local/remote attack-simulation scripts
+├── tests/                  # Runtime-focused unit/integration tests
+├── attack_simulator.py     # Dynamic filesystem attack-behavior simulator
 ├── requirements.txt
-├── .env.example                   # Environment variable template
-├── .gitignore
-├── README.md
-│
-├── api/                           # Flask API for remote actions & WebAuthn
-│   └── flask_app.py
-│
-├── auth/                          # Authentication logic
-│   ├── biometric_manager.py
-│   ├── otp_manager.py
-│   └── session_manager.py
-│
-├── core/                          # Core services and state management
-│   ├── runtime_state.py
-│   ├── crypto_service.py
-│   └── vault.py
-│
-├── dashboard/                     # GUI Layer (CustomTkinter)
-│   ├── app.py                     # Main GUI application
-│   ├── dashboard_tab.py
-│   ├── logs_tab.py
-│   ├── timeline_tab.py
-│   └── ... (other UI tabs)
-│
-├── database/                      # Supabase integration layer
-│   ├── client.py
-│   ├── db_manager.py
-│   └── schema.sql                 # Reference schema
-│
-├── monitor/                       # Real-time detection core
-│   ├── event_bus.py
-│   ├── file_monitor.py
-│   ├── process_monitor.py
-│   ├── network_monitor.py
-│   ├── threat_engine.py           # Rule-based detection
-│   ├── response_engine.py         # Automated containment
-│   ├── ml_detector.py             # Anomaly detection
-│   ├── risk_engine.py             # Cumulative risk scoring
-│   └── feature_extractor.py       # ML feature vector creation
-│
-├── notifications/                 # Email alert system
-│   └── email_sender.py
-│
-├── simulator/                     # Attack simulation scripts
-│   ├── attack_sim.py              # Local simulation
-│   ├── attack_remote.py
-│   ├── sim_config.json
-│
-├── tests/                         # Unit and integration tests
-│   ├── test_otp.py
-│
-├── assets/                        # (gitignored) Runtime assets
-│
-├── build_windows.bat
-└── build.spec
+├── build.spec              # PyInstaller specification
+└── setup.iss               # Inno Setup installer definition
 ```
 
-## 🚀 Installation
+`blue_team_system/` is a separate, older prototype with its own tests and requirements; the supported runtime documented here is the top-level `main.py` application.
 
-### Prerequisites
-- Python 3.10+
-- Internet connection (Supabase)
-- Supabase account (free tier)
+## Requirements
 
-### Setup
+- Windows 10/11 (USB monitoring, Windows notifications, and the build scripts are Windows-specific)
+- Python 3.10 or later
+- A Supabase project and credentials
+- Internet access when using Supabase, Resend email, IP enrichment, or a public biometric pairing tunnel
 
-1. **Clone the repository**
-```bash
-git clone https://github.com/Md-Zakiur-Rahman/ATLAS.git
-cd ATLAS
-```
+Install the declared packages:
 
-2. **Install dependencies**
-```bash
+```powershell
 py -3.10 -m pip install -r requirements.txt
 ```
 
-3. **Configure environment variables**
-SUPABASE_URL=your_supabase_url
+The launcher/API also import these runtime packages, which are not currently listed in `requirements.txt`:
+
+```powershell
+py -3.10 -m pip install flask flask-limiter schedule scikit-learn Pillow
+```
+
+## Configuration
+
+Create a `.env` file beside `main.py`. Start from the variable names in [`config/secrets.example.py`](config/secrets.example.py):
+
+```dotenv
+SUPABASE_URL=https://your-project-ref.supabase.co
 SUPABASE_KEY=your_supabase_key
-RESEND_API_KEY=your_resend_key
-SMTP_FROM=onboarding@resend.dev
-4. **Initialize the database**
-Run `database/schema.sql` in your Supabase project.
 
-5. **Run the application**
-```bash
+# Needed for email OTP and threat notifications
+RESEND_API_KEY=your_resend_api_key
+SMTP_FROM=security@example.com
+
+# Recommended when exposing the Flask service
+FLASK_SECRET_KEY=use-a-long-random-secret
+```
+
+Optional SMTP settings are `SMTP_HOST` (default: `smtp.resend.com`), `SMTP_PORT` (default: `465`), and `SMTP_USER` (default: `resend`).
+
+For the QR/WebAuthn flow, configure the values expected by `auth/biometric_manager.py` and make the local API reachable via HTTPS. If `NGROK_DOMAIN` is set and `ngrok` is on `PATH`, the normal launcher attempts to start an `ngrok http 80` tunnel. These integrations are optional; the dashboard continues without biometric routes if their dependencies or configuration are unavailable.
+
+### Supabase
+
+The runtime requires `SUPABASE_URL` and `SUPABASE_KEY` at startup. Apply the schema appropriate to your Supabase deployment before registering users. [`database/schema.sql`](database/schema.sql) is a reference schema for local-style event tables; the active application also expects Supabase tables used by the authentication, OTP, notification, biometric, and remote-lock flows. Review those queries and apply your project migration/schema before using the application against production data.
+
+Never commit `.env`, service-role keys, or generated vault material.
+
+## Run ATLAS
+
+From this directory:
+
+```powershell
 py -3.10 main.py
 ```
 
-## 💻 Usage
+This launches the monitoring runtime, a Flask service at `0.0.0.0:80`, and the dashboard. The login screen supports user registration, password verification followed by email OTP, and—when configured—passkey approval.
 
-### Normal mode
-```bash
-py -3.10 main.py
+The API health endpoint is available at:
+
+```text
+GET http://localhost/health
 ```
 
-### Training mode (ML baseline)
-```bash
-py -3.10 main.py --train --train-days 1.0
+Do not expose the API directly to the internet. Place it behind a properly configured HTTPS reverse proxy or use a controlled tunnel for the biometric workflow.
+
+## ML baseline training
+
+Collect representative, benign activity before relying on ML anomaly scores:
+
+```powershell
+py -3.10 main.py --baseline-train --train-days 1
 ```
 
-### Demo mode
-Launch with demo credentials to explore all features without live Supabase.
+`--train` currently uses the same collection-only training runtime. The process periodically saves feature history and trains a model when the collection interval completes; interrupting it saves collected history and trains only when at least 60 samples are available. Normal mode retains rule-based detection even without a trained model.
 
-## 🏗️ Architecture
+## Testing and simulation
 
-| Layer | Technology | Purpose |
-|---|---|---|
-| UI | CustomTkinter 5.2.0 | Modern Python GUI |
-| Database | Supabase (PostgreSQL) | Cloud storage |
-| Backend | Python 3.10+ | Core logic |
-| ML | scikit-learn | Isolation Forest anomaly detection |
-| Reports | ReportLab | PDF generation |
-| Visualization | Matplotlib | Charts & graphs |
-| Alerts | Resend SMTP | Email notifications |
-| API | Flask | Remote lock & auth endpoints |
+Run the runtime test suite from this directory:
 
-## 🗄️ Database
-
-### Supabase Tables
-- `events` — event logging with hash-chaining
-- `threats` — threat records and analysis
-- `network_connections` — network activity logs
-- `auth` — user authentication data
-- `rename_log` — file rename tracking for ransomware detection
-- `notifications` — security alert audit trail
-- `otp_sessions` — OTP code tracking
-
-## 🌐 API
-
-```bash
-python -m api.flask_app
+```powershell
+py -3.10 -m unittest discover -s tests
 ```
 
-| Endpoint | Method | Description |
-|---|---|---|
-| `/health` | GET | Health check |
-| `/auth-verify` | POST | Verify credentials |
-| `/auth-otp` | POST | Send OTP email |
-| `/remote-lock` | GET | Trigger remote vault lock |
+Some tests and imports require valid Supabase configuration. The legacy prototype test suite under `blue_team_system/tests/` uses `pytest` and is separate from the main runtime.
 
-## 🧪 Tests
+To exercise the detector using the configurable local simulation:
 
-```bash
-python -m unittest discover
+```powershell
+py -3.10 simulator/attack_sim.py
 ```
 
-## 📦 Building for Windows
+Before running it, inspect [`simulator/sim_config.json`](simulator/sim_config.json). It performs localhost port checks, repeated authentication requests, writes synthetic files to `attack_folder`, renames generated files to simulate ransomware behavior, and attempts the configured C2 connection. Renamed simulator files are restored after `revert_delay_seconds`; generated test files are not automatically removed.
 
-```bash
-python -m PyInstaller build.spec
+For a randomized filesystem-behavior demo, use:
+
+```powershell
+py -3.10 attack_simulator.py --path D:\ATLAS_TEST --intensity medium
+```
+
+Use a dedicated test directory—never a directory containing real files.
+
+## API overview
+
+| Endpoint | Method | Purpose |
+| --- | --- | --- |
+| `/health` | `GET` | Runtime health response |
+| `/auth-verify` | `POST` | Verifies password; MFA remains required |
+| `/auth-otp` | `POST` | Sends an email OTP |
+| `/remote-lock?token=…` | `GET` | Consumes a one-time remote-lock token |
+| `/biometric/pair/<qr_token>` | `GET` | QR pairing page when WebAuthn is enabled |
+| `/webauthn/*` | `POST` | Passkey registration/authentication flow |
+
+The API uses an in-memory rate limiter. It is intended for the local application and controlled biometric tunnel, not as a public multi-instance web service.
+
+## Build for Windows
+
+Install PyInstaller, then run either build entry point:
+
+```powershell
+py -3.10 -m pip install pyinstaller
+py -3.10 -m PyInstaller build.spec
 # or
-build_windows.bat
+.\build_windows.ps1
 ```
 
-## 🔒 Security & Privacy
+`build.spec` currently produces `dist/BlueTeamSystem.exe`. Review and align [`setup.iss`](setup.iss) with that artifact name before compiling an Inno Setup installer, since its file entries currently refer to `ATLAS.exe`.
 
-- Never commit `config/secrets.py` or `.env`
-- Use service role key for Supabase backend only
-- Rotate keys before sharing or publishing the repo
+## Security notes
+
+- Use non-production data and a test host while evaluating automated containment.
+- Treat remote-lock URLs as one-time secrets; they lock the vault for their associated user.
+- Supply a strong `FLASK_SECRET_KEY`; the development fallback is not suitable for deployment.
+- Review detection rules, monitored paths, process allowlists, and response behavior in `monitor/` before enabling it on a production workstation.
+
+## License
+
+No license file is currently included. Do not assume permission to redistribute or use the project beyond the repository owner’s terms.
